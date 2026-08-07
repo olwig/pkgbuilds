@@ -1,0 +1,22 @@
+name: Update grok-build-bin PKGBUILD
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch stable version from xAI
+        id: version
+        run: |
+          VERSION=$(curl -s https://x.ai/cli/stable)
+          echo "Current stable version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Print version
+        run: |
+          echo "Read version is: ${{ steps.version.outputs.version }}"
