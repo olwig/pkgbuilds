@@ -1,0 +1,114 @@
+name: update-versions
+
+on:
+  schedule:
+    - cron: '0 */12 * * *'
+  workflow_dispatch:
+
+jobs:
+  grok-build-bin:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: upstream version
+        id: upstream
+        run: |
+          set -euo pipefail
+
+          version=$(curl -fsS https://x.ai/cli/stable | tr -d '[:space:]')
+          echo "Upstream (x.ai) stable version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      
+      - name: pkgbuild version
+        id: pkgbuild
+        run: |
+          set -euo pipefail
+
+          pkgbuild_file="grok-build-bin/PKGBUILD"
+          if [[ ! -f "$pkgbuild_file" ]]; then
+            echo "ERROR: $pkgbuild_file not found"
+            exit 1
+          fi
+
+          pkgbuild_version=$(grep -oP 'pkgver=\K[0-9]+(\.[0-9]+)*' "$pkgbuild_file" | head -n1)
+          #pkgbuild_release=$(grep -oP 'pkgrel=\K[0-9]+' "$pkgbuild_file" | head -n1)
+
+          if [[ -z "$pkgbuild_version" ]]; then
+            echo "ERROR: Could not parse pkgver from PKGBUILD"
+            exit 1
+          fi
+
+          echo "PKGBUILD version: $pkgbuild_version"
+          #echo "PKGBUILD release: ${pkgbuild_release:-?}"
+          
+          echo "version=$pkgbuild_version" >> "$GITHUB_OUTPUT"
+          #echo "release=${pkgbuild_release:-}" >> "$GITHUB_OUTPUT"
+
+      - name: compare versions
+        id: compare
+        run: |
+          set -euo pipefail
+
+          upstream_version="${{ steps.upstream.outputs.version }}"
+          pkgbuild_version="${{ steps.pkgbuild.outputs.version }}"
+          #pkgbuild_release="${{ steps.pkgbuild.outputs.release }}"
+
+          if [[ "$pkgbuild_version" == "$upstream_version" ]]; then
+            echo "Versions are identical. Nothing to do."
+            exit 0
+          fi
+          
+          lowest=$(printf '%s\n' "$pkgbuild_version" "$upstream_version" | sort -V | head -n1)
+          if [[ "$lowest" == "$pkgbuild_version" ]]; then
+            echo "PKGBUILD is older than upstream → update needed"
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "PKGBUILD is NEWER than upstream. Please check manually."
+            exit 1
+          fi
+
+      - name: Print versions
+        run: |
+          echo "Upstream : ${{ steps.compare.outputs.upstream_version }}"
+          echo "PKGBUILD : ${{ steps.compare.outputs.pkgbuild_version }}"
+          echo "has_update = ${{ steps.compare.outputs.has_update }}"
+
+      - name: Notify about new version
+        if: steps.compare.outputs.has_update == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const version = "${{ steps.compare.outputs.upstream_version }}";
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `New grok-build version: ${version}`,
+              body: `@olwig\n\nNew version found: **${version}**\n\nPlease update the PKGBUILD for \`grok-build-bin\`.`
+            });
+            
+  grok-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compare upstream to PKGBUILD version
+        id: version
+        run: |
+          set -euo pipefail
+
+          search_url="https://raw.githubusercontent.com/xai-org/grok-build/main/crates/codegen/xai-grok-pager-bin/Cargo.toml"
+          VERSION=$(curl -fsS "$search_url" | grep -oP 'version = "\K[^"]+')
+          echo "Upstream (github) stable version: $VERSION"
+
+          exit 0

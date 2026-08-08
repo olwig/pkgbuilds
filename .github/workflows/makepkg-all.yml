@@ -1,0 +1,39 @@
+name: makepkg-all
+
+on:
+  workflow_dispatch:
+
+jobs:
+  makepkg:
+    name: makepkg (${{ matrix.pkg }})
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+
+    strategy:
+      fail-fast: false
+      matrix:
+        pkg:
+          - grok-build
+          - grok-build-bin
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare build environment
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed sudo
+
+          useradd -m -G wheel builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
+          chmod 0440 /etc/sudoers.d/builder
+
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+
+      - name: makepkg -si (build + install test)
+        working-directory: ${{ matrix.pkg }}
+        run: |
+          sudo -u builder makepkg -si --noconfirm
+          echo "makepkg finished successfully – package built and installed"

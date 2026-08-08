@@ -1,0 +1,15 @@
+pkgbase = grok-build
+	pkgdesc = ! SKELETON ! DONT USE !SpaceXAI's coding agent harness and TUI. Fullscreen, mouse interactive, extensible.
+	pkgver = 1.0.0
+	pkgrel = 1
+	url = https://x.ai/build
+	arch = x86_64
+	arch = aarch64
+	license = Apache-2.0
+	provides = grok
+	conflicts = grok
+	options = !strip
+	options = !debug
+	options = !emptydirs
+
+pkgname = grok-build

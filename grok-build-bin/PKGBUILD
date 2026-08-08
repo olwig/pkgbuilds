@@ -19,6 +19,9 @@ b2sums_x86_64=('64e0ea3d3e92e27728bb62d696b552bde1f2f94591b6e94a21b865f898d66b1f
 b2sums_aarch64=('6876d6401964ed007924e45d7128d841867ecfb1efeb1fdb55a5c0cf6170a113dc5be476b6b1317e929f800883320b318043d8ecb0bb39f4a40b0ecec29a99b7')
 b2sums=('d71170807c24118616aa2c4a1c2927bd4408ed6a7694bb02ad007aa5fad8939d42f586d576c1fd3d4e505e0eeb715443cdadcf268750807c860eb28c23ba53fa')
 
+# TODO implement default strict sandbox -> https://docs.x.ai/build/features/sandbox
+# TODO restrict with explicit local grok user
+
 package() {
   install -Dm755 "$srcdir/grok-$pkgver-$CARCH" "$pkgdir/usr/bin/grok"
   install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
