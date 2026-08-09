@@ -21,6 +21,8 @@ jobs:
           #- pkg: <some package>
           #  arch: <some architecture>
 
+    # TODO check pkgbuilds arch befor spawning container, to avoid wasting time on unsupported archs
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
