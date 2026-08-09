@@ -1,0 +1,98 @@
+name: makepkg
+
+on:
+  workflow_dispatch:
+    inputs: &common_inputs
+      pkgs:
+        description: 'PKGBUILDs to build as json or csv array. If empty ([] or "") or not provided, all PKGBUILDs will be built. Not available pkgs will be ignored'
+        required: false
+        default: ''
+        type: string
+      ref:
+        description: 'git ref to build from. If empty or not provided, the default branch will be used. Invalid ref will fail the workflow.'
+        required: false
+        default: ''
+        type: string
+  workflow_call:
+    inputs: *common_inputs
+
+jobs:
+  skeleton:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        if: true
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || 'main' }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+
+      - name: Evaluate input parameters
+        id: eval-inputs
+        shell: python
+        run: |
+          import json
+          import sys
+          import os
+
+          pkgs = []
+          ref = "${{ inputs.ref || 'main' }}"
+
+          pkgs_input = "${{ inputs.pkgs }}"
+          if not isinstance(pkgs_input, str):
+              pkgs_input = '[]'
+
+          # extract list from input string, which can be a JSON array or a CSV string
+          if pkgs_input.startswith('[') and pkgs_input.endswith(']'):
+              try:
+                  pkgs = json.loads(pkgs_input)
+              except json.JSONDecodeError:
+                  print("Invalid JSON input for 'pkgs'. Please provide a valid JSON array.")
+                  sys.exit(1)
+          else:
+              # Input is a CSV string, convert to list
+              pkgs = [pkg.strip() for pkg in pkgs_input.split(',') if pkg.strip()]
+
+          # must be list of strings
+          if not all(isinstance(pkg, str) for pkg in pkgs):
+              print("Input 'pkgs' must be a list of strings.")
+              sys.exit(1)
+          
+          # get all pkgs from subdirectories containing PKGBUILD files
+          available_pkgs = []
+          for entry in os.listdir('.'):
+              if os.path.isdir(entry) and os.path.isfile(os.path.join(entry, 'PKGBUILD')):
+                  available_pkgs.append(entry)
+          print("Available PKGBUILDs:", available_pkgs)
+
+          if len(pkgs) == 0:
+              print("No packages specified, building all available PKGBUILDs")
+              pkgs = available_pkgs
+          
+          # remove any packages that are not in available_pkgs
+          pkgs = [pkg for pkg in pkgs if pkg in available_pkgs]
+
+          # print the list of packages to be built
+          print("Packages to build:", pkgs)
+          print("Git ref to build from:", ref)
+
+          # store pkgs and ref for next steps, GITHUB_OUTPUT. each value per leine
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"pkgs={json.dumps(pkgs)}\n")
+              f.write(f"ref={ref}\n")
+
+          #dump GITHUB_OUTPUT for debugging
+          print("GITHUB_OUTPUT contents: " + os.environ['GITHUB_OUTPUT'])
+          with open(os.environ['GITHUB_OUTPUT'], 'r') as f:
+              print(f.read())
+          
+          
