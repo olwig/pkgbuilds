@@ -5,35 +5,51 @@ on:
 
 jobs:
   makepkg:
-    name: makepkg (${{ matrix.pkg }})
-    runs-on: ubuntu-latest
+    name: makepkg (${{ matrix.pkg }} / ${{ matrix.arch }})
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     container:
       image: archlinux:base-devel
-
     strategy:
       fail-fast: false
       matrix:
-        pkg:
+        pkg: 
           - grok-build
           - grok-build-bin
+        arch: [x86_64, aarch64]
+        #exclude:
+          #- pkg: <some package>
+          #  arch: <some architecture>
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Prepare build environment
+      - name: Skip unsupported architectures
+        id: skip-unsupported-arch
+        working-directory: ${{ matrix.pkg }}
         run: |
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm --needed sudo
+          if [[ ! -f PKGBUILD ]]; then
+            echo "PKGBUILD not found in $PWD"
+            exit 1
+          fi
 
-          useradd -m -G wheel builder
-          echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
-          chmod 0440 /etc/sudoers.d/builder
+          # TODO ensure archs tring check is correct
+          if grep -qE "arch=\([^)]*\b(${{ matrix.arch }}|any)\b" PKGBUILD; then
+            echo "Arch ${{ matrix.arch }} is supported by this package"
+            echo "skip=false" >> $GITHUB_OUTPUT
+          else
+            echo "Arch ${{ matrix.arch }} is not supported by this package"
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
 
-          chown -R builder:builder "$GITHUB_WORKSPACE"
+      - name: Ensure archlinux sudo workspace ownership with NOPASSWD
+        if: steps.skip-unsupported-arch.outputs.skip == 'false'
+        uses: ./.github/actions/ensure-arch-sudo-nopass
 
       - name: makepkg -si (build + install test)
+        if: steps.skip-unsupported-arch.outputs.skip == 'false'
         working-directory: ${{ matrix.pkg }}
         run: |
           sudo -u builder makepkg -si --noconfirm
-          echo "makepkg finished successfully – package built and installed"
+          echo "makepkg finished successfully"

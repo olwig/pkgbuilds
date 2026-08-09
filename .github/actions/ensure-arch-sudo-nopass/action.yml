@@ -1,0 +1,31 @@
+name: ensure-arch-sudo-nopass
+description: Ensure sudo exists on Arch Linux, configure NOPASSWD for current user, and set workspace ownership.
+
+runs:
+  using: composite
+  steps:
+    - name: Ensure its arch linux
+      shell: bash
+      run: |
+        if [[ ! -f /etc/os-release ]]; then
+          echo "Not an Arch Linux system: /etc/os-release not found"
+          exit 1
+        fi
+
+        . /etc/os-release
+        if [[ "${ID:-}" != "arch" && "${ID_LIKE:-}" != *"arch"* ]]; then
+          echo "Not an Arch Linux system (ID=${ID:-unknown}, ID_LIKE=${ID_LIKE:-unknown})"
+          exit 1
+        fi
+
+    - name: Ensure sudo workspace ownership with NOPASSWD
+      shell: bash
+      run: |
+        pacman -Syu --noconfirm
+        pacman -S --noconfirm --needed sudo
+
+        id -u builder &>/dev/null || useradd -m -G wheel builder
+        echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
+        chmod 0440 /etc/sudoers.d/builder
+
+        chown -R builder:builder "$GITHUB_WORKSPACE"
