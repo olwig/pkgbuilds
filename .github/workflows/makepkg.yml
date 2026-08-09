@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs: &common_inputs
       pkgs:
-        description: 'build PKGBUILDs. pkgs: json or csv array. If empty ([] or "") or not provided, all PKGBUILDs will be built. Not available pkgs will be ignored'
+        description: 'PKGBUILDs to build as json or csv array. If empty ([] or "") or not provided, all PKGBUILDs will be built. Not available pkgs will be ignored'
         required: false
         default: ''
         type: string
