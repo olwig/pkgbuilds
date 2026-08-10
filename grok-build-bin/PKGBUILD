@@ -2,9 +2,12 @@
 
 pkgname=grok-build-bin
 pkgver=1.0.0
-pkgrel=2
+pkgrel=1
 pkgdesc="SpaceXAI's coding agent harness and TUI. Fullscreen, mouse interactive, extensible."
-arch=('x86_64' 'aarch64')
+arch=(
+  'x86_64' 
+  'aarch64'
+)
 url="https://x.ai/build"
 license=('Apache-2.0')
 provides=('grok')
