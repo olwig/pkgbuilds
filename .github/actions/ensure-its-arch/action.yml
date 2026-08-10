@@ -1,0 +1,28 @@
+name: ensure-its-arch
+description: Ensure sudo exists on Arch Linux, configure NOPASSWD for current user, and set workspace ownership.
+
+inputs:
+  pkgs:
+    description: 'Packages to install as space separated list'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Ensure its arch linux
+      shell: bash
+      run: |
+        if [[ ! -f /etc/os-release ]]; then
+          echo "Not an Arch Linux system: /etc/os-release not found"
+          exit 1
+        fi
+
+        . /etc/os-release
+        if [[ "${ID:-}" != "arch" && "${ID_LIKE:-}" != *"arch"* ]]; then
+          echo "Not an Arch Linux system (ID=${ID:-unknown}, ID_LIKE=${ID_LIKE:-unknown})"
+          exit 1
+        fi
+
+        pacman -Syu --noconfirm
+        pacman -S --noconfirm --needed sudo ${{ inputs.pkgs }}
