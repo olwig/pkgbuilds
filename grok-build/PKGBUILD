@@ -13,6 +13,7 @@ license=('Apache-2.0')
 provides=('grok')
 conflicts=('grok')
 options=('!strip' '!debug' '!emptydirs')
+install=foo.install
 
 backup=('etc/grok/requirements.toml')
 
@@ -32,10 +33,6 @@ b2sums=(
 
 # TODO default "ultra" sandbox -> https://docs.x.ai/build/features/sandbox
 # TODO restrict with explicit local grok user
-
-post_install() {
-  echo "DEBUG: post_install()"
-}
 
 package() {
   
