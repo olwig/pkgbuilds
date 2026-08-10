@@ -33,6 +33,10 @@ b2sums=(
 # TODO default "ultra" sandbox -> https://docs.x.ai/build/features/sandbox
 # TODO restrict with explicit local grok user
 
+post_install() {
+  echo "DEBUG: post_install()"
+}
+
 package() {
   
   install -Dm755 "$srcdir/grok-$pkgver-$CARCH" "$pkgdir/usr/bin/grok"
