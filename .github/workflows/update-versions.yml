@@ -54,17 +54,21 @@ jobs:
         id: compare
         run: |
           set -euo pipefail
-
+      
           upstream_version="${{ steps.upstream.outputs.version }}"
           pkgbuild_version="${{ steps.pkgbuild.outputs.version }}"
-          #pkgbuild_release="${{ steps.pkgbuild.outputs.release }}"
-
+      
+          echo "upstream_version=$upstream_version" >> "$GITHUB_OUTPUT"
+          echo "pkgbuild_version=$pkgbuild_version" >> "$GITHUB_OUTPUT"
+      
           if [[ "$pkgbuild_version" == "$upstream_version" ]]; then
             echo "Versions are identical. Nothing to do."
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          
+      
           lowest=$(printf '%s\n' "$pkgbuild_version" "$upstream_version" | sort -V | head -n1)
+      
           if [[ "$lowest" == "$pkgbuild_version" ]]; then
             echo "PKGBUILD is older than upstream → update needed"
             echo "has_update=true" >> "$GITHUB_OUTPUT"
