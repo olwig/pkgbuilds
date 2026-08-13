@@ -12,15 +12,17 @@ jobs:
       contents: read
       issues: write
 
+    defaults:
+      run:
+        shell: bash -uo pipefail {0}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: upstream version
+      - name: upstream version  
         id: upstream
         run: |
-          set -euo pipefail
-
           version=$(curl -fsS https://x.ai/cli/stable | tr -d '[:space:]')
           echo "Upstream (x.ai) stable version: $version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -28,32 +30,26 @@ jobs:
       - name: pkgbuild version
         id: pkgbuild
         run: |
-          set -euo pipefail
-
           pkgbuild_file="grok-build-bin/PKGBUILD"
           if [[ ! -f "$pkgbuild_file" ]]; then
             echo "ERROR: $pkgbuild_file not found"
             exit 1
           fi
 
-          pkgbuild_version=$(grep -oP 'pkgver=\K[0-9]+(\.[0-9]+)*' "$pkgbuild_file" | head -n1)
-          #pkgbuild_release=$(grep -oP 'pkgrel=\K[0-9]+' "$pkgbuild_file" | head -n1)
-
-          if [[ -z "$pkgbuild_version" ]]; then
-            echo "ERROR: Could not parse pkgver from PKGBUILD"
+          . "$pkgbuild_file"
+          if [[ ! "$pkgver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: PKGBUILD pkgver is not in x.y.z format: $pkgver"
             exit 1
           fi
 
-          echo "PKGBUILD version: $pkgbuild_version"
-          #echo "PKGBUILD release: ${pkgbuild_release:-?}"
-          
-          echo "version=$pkgbuild_version" >> "$GITHUB_OUTPUT"
-          #echo "release=${pkgbuild_release:-}" >> "$GITHUB_OUTPUT"
+          echo "PKGBUILD version: $pkgver"
+          echo "version=$pkgver" >> "$GITHUB_OUTPUT"
 
       - name: compare versions
         id: compare
         run: |
-          set -euo pipefail
+
+          # TODO source PKGBUILD and get pkgver instead of hardcoding it here
       
           upstream_version="${{ steps.upstream.outputs.version }}"
           pkgbuild_version="${{ steps.pkgbuild.outputs.version }}"
