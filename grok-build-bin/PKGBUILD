@@ -1,7 +1,7 @@
 # Maintainer: Olaf Wriggers <olaf@olwig.xyz>
 
 pkgname=grok-build-bin
-pkgver='1.0.3'
+pkgver=1.0.3
 pkgrel=1
 pkgdesc="SpaceXAI's coding agent harness and TUI. Fullscreen, mouse interactive, extensible."
 arch=(
