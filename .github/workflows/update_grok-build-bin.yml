@@ -1,0 +1,597 @@
+
+# time act workflow_dispatch -W .github/workflows/update_grok-build-bin.yml  --env LOCAL_COPY=true --env WORK_FLUSH=true --bind --artifact-server-path .github/work/artifacts --reuse
+# time act workflow_dispatch -W .github/workflows/update_grok-build-bin.yml  --env LOCAL_COPY=true --env WORK_FLUSH=true --bind --artifact-server-path .github/work/act_artifacts
+# time act workflow_dispatch -W .github/workflows/update_grok-build-bin.yml --bind --artifact-server-path .github/work/act_artifacts  -s GITHUB_TOKEN=(gh auth token) --env-file act_env --reuse
+
+name: update_grok-build-bin
+
+
+# TODO
+# flush
+# add env random sub wiok folders
+# like that resuse works well to jump to later step end reuse  fodlers ?!?!?!s
+
+
+
+on:
+  #schedule:
+    #- cron: '0 8 * * *'
+
+  workflow_dispatch:
+
+env: # global env's for the workflow, can be overwritten in jobs opr  from external e.g. act cmd 
+  PKG: grok-build-bin   # package name to update, just for better readability
+
+  # the workflow works on files only in the WORK_ROOT
+  # each event creates a new session folder in the WORK_ROOT
+  # steps create theri indiviual sub folder s there by their liking
+  # using this approach to allow act --resue for faster runner deplaiment with freh data
+  # for testing use bind resuse and dont flush and use none random session number, fater each run you have accces wo the work folders and check whats uü 
+  # mjust be relaticve to GITHUB_WORKSPACE
+  WORK_ROOT: ".github/work" # root path for work folders. will be cretaed in GITHUB_WORKSPACE. jobs localte their stuff thres
+  
+  # 'local' will check in the local repo if an update branch already exists, 'remote' will check on remote if an update branch already exists. if not set it will not check and always create a new update branch
+  UPDATE_BRANCH_LOCATION: "remote"
+
+  # update branch name, where updated PKGBUILD will be pushed to
+  UPDATE_BRANCH_PREFIX: "update_" # job will add <package>-<upstream_version>
+
+  # if empty a random id will be generatd on each run
+  WORK_ID: ""
+
+  # will delete the WORK_ROOT to runner will not be flooded some time
+  WORK_FLUSH: "true"    # will flush work folder if this var is not explicitly set to false
+
+  # copys GITHUB_WORKSPACE to work folder  in case using act. working in work folders since act --bind you mess out our local repository
+  LOCAL_COPY: "false"   # will copy local repo to work folder if this var explicitly set true
+
+  # if local copy, copied repo will be switched to this branch. if not set it will stay on the branch that was checked out in the local repo
+  # for testing local files keep empty
+  # defaults to empty, beause default it runs on gh which gives exactly whats neded
+  SWITCH_BEFORE_PUSH_PR: "" 
+
+  # if LOCAL_COPY is set to true this will reset and clean the local repo in the work folder before switching branch. default is true
+  # for testing local files set false, e.g. manualy decrese version pkg to imitate loewr version than upstream
+  # defaults to false, beause default it runs on gh which gives exactly whats neded
+  # this is only to reset and clean the repo copy which is use right bevore commit and pr. previus repo copies are not reset or clean because they need the local version
+  RESET_AND_CLEAN_BEFORE_PUSH_PR: "false" 
+  
+  # act cmd set it if using act
+  ACT: "false"
+  
+  # if set to true the workflow will push and create a pull request for the updated PKGBUILD
+  PUSH_AND_PR: "true" 
+
+
+
+
+
+jobs:
+  pkgbuild:
+    runs-on: ubuntu-latest
+
+    # env's create from inside the jobs steps, just let the ide know they exist
+    env: 
+
+      # architectures definedin the PKGBUILD
+      ARCHS: ""  
+
+      # realtive work path to GITHUB_WORKSPACE where the job will work in. will be set by setup step
+      WORK_DIR: ""  
+
+    outputs:
+
+      # build matrix for makepkg job to build all architectures defined in the PKGBUILD on archlinux machine  
+      matrix: ${{ steps.generate-matrix.outputs.matrix }}
+      work_id: ${{ steps.work-id.outputs.work_id }}
+      update_branch: ${{ steps.define-branch.outputs.update_branch }}
+      upstream_version: ${{ steps.upstream-version.outputs.upstream_version }}
+
+    steps:
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Prepare runner environment
+        run: |
+          apt update -y
+          apt install tree rsync -y 
+
+          pip install --upgrade pip
+
+      - name: Fetch upstream version
+        id: upstream-version
+        run: |
+          url="https://x.ai/cli/stable"
+          echo "Fetching upstream version from $url"
+          upstream_version=$(curl -s $url)
+          if [[ ! $upstream_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Upstream version is not a valid version string: $upstream_version"
+            exit 1
+          fi
+          echo "Upstream version: $upstream_version"
+          echo "upstream_version=$upstream_version" >> $GITHUB_OUTPUT
+
+      - name: Flush work folder if requested
+        if: ${{ env.WORK_FLUSH == 'true' }}
+        run: |
+          to_flush="${{ env.WORK_ROOT }}"
+          if [[ -d "$to_flush" ]]; then
+            echo "Flushing work folder: $to_flush"
+            rm -rf "$to_flush"
+          else
+            echo "Work folder does not exist, nothing to flush: $to_flush"
+          fi
+
+      - name: Create work id if not set
+        id: work-id
+        run: |
+          work_id="${{ env.WORK_ID }}"
+          if [[ -z "$work_id" ]]; then
+            work_id=$(tr -dc 'a-z0-9' </dev/urandom | head -c 12)
+          fi
+          echo "Generated work id: $work_id"
+          echo "work_id=$work_id" >> "$GITHUB_OUTPUT"
+           
+      - name: Create and populate work folder
+        run: |
+          work_id="${{ steps.work-id.outputs.work_id }}"
+          job_name="${{ github.job }}"
+          work_dir="${{ env.WORK_ROOT }}/$work_id/$job_name"          
+
+          mkdir -p "$work_dir"
+          echo "Created work folder: $work_dir"
+
+          echo "WORK_DIR=$work_dir" >> "$GITHUB_ENV"
+            
+      - name: Copy local data to work dir if requested
+        if: ${{ env.LOCAL_COPY == 'true' }}
+        run: |
+          rsync -av \
+            --exclude="${{ env.WORK_ROOT }}" \
+            "./" "$WORK_DIR/repo/"
+          echo "Copied local data to work dir: $WORK_DIR"
+
+          cd "$WORK_DIR/repo/"
+
+      - name: Checkout repository
+        if: ${{ env.LOCAL_COPY != 'true' }}
+        uses: actions/checkout@v7
+        with:
+          path: ${{ env.WORK_DIR }}/repo/
+
+      - name: Define update branch name based on package and upstream version
+        id: define-branch
+        run: |
+          prefix="${{ env.UPDATE_BRANCH_PREFIX }}"
+          if [[ -z "$prefix" ]]; then
+            prefix="update_"
+          fi
+
+          upstream_version="${{ steps.upstream-version.outputs.upstream_version }}"
+          update_branch="${prefix}${{ env.PKG }}-${upstream_version}"
+          echo "Update branch name: $update_branch"
+
+          echo "update_branch=$update_branch" >> $GITHUB_OUTPUT
+
+      - name: Check if update already exists on remote/local and store name for later use
+        working-directory: ${{ env.WORK_DIR }}/repo/
+        run: |
+          branch="${{ steps.define-branch.outputs.update_branch }}" 
+          location="${{ env.UPDATE_BRANCH_LOCATION }}"
+
+          if [[ "$location" == "remote" ]]; then
+            if git ls-remote --heads origin $branch | grep -q $branch; then
+              echo "Update branch $branch already exists on remote. No update needed."
+              exit 1
+            fi
+          elif [[ "$location" == "local" ]]; then
+            if git show-ref --verify --quiet refs/heads/$branch; then
+              echo "Update branch $branch already exists locally. No update needed."
+              exit 1
+            fi
+          else
+            echo "Invalid value for UPDATE_BRANCH_LOCATION: $location. Must be 'local' or 'remote'."
+            exit 1
+          fi
+
+          echo "Update branch $branch does not exist on ${location}ly. Means not pending pull request for same version."
+
+      - name: Perform PKGBUILD update 
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          pkg="${{ env.PKG }}"
+          cp -r "repo/$pkg" .
+          cd "$pkg"
+
+          upstream_version="${{ steps.upstream-version.outputs.upstream_version }}"
+
+          . ./PKGBUILD
+          echo "Current pkgver in PKGBUILD: $pkgver"
+
+          # check if upstream version is greater than current pkgver
+          if [ "$(printf '%s\n' "$pkgver" "$upstream_version" | sort -V | head -n1)" = "$upstream_version" ]; then
+            echo "Upstream version $upstream_version is not greater than current pkgver $pkgver. No update needed."
+            exit 1
+          fi
+
+          # update pkgver in PKGBUILD
+          sed -i "s/^pkgver=.*/pkgver=$upstream_version/" PKGBUILD
+
+          # reset release number to 1
+          sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+
+          # source again to get new pkgver from updated PKGBUILD, do download sources
+          . PKGBUILD
+
+        
+
+
+
+          # combine all source and b2sums arrays and process all at once. source source_<arch[0]> ..
+          sources=("${source[@]}")
+          sums=("${b2sums[@]}")
+          for a in "${arch[@]}"; do
+            echo "Processing source and b2sums arrays for architecture: $a"
+            
+            var="source_${a}[@]"
+            sources+=("${!var}")
+
+            var="b2sums_${a}[@]"
+            sums+=("${!var}")
+          done
+
+          # loop thuough sources, download (if url) and update b2sum in PKGBUILD
+          index=0
+          for src in "${sources[@]}"; do
+            echo "Processing source: $src"
+       
+            # split by ::
+            if [[ $src == *::* ]]; then
+              filename=${src%%::*}
+              url=${src#*::}
+            else
+              url=$src
+              filename=$(basename "$url")
+            fi
+
+            echo "Filename: $filename"
+            echo "URL: $url"
+
+            # contine if not an url. local files dont need to update b2sum
+            if [[ ! $url =~ ^https?:// ]]; then
+              echo "Skipping local file: $url"
+              index=$((index + 1))
+              continue
+            fi
+
+            echo "Downloading source: $url"
+            curl -L -o "$filename" "$url"
+
+            # check if was downloaded
+            if [ ! -f "$filename" ]; then
+              echo "Downloaded file not present: $filename. Download failed."
+              exit 1
+            fi
+
+            # calc b2sum
+            b2sum_new=$(b2sum "$filename" | awk '{print $1}')
+            echo "Calculated b2sum for $filename: $b2sum_new"
+
+            # get old b2sum from sums array at sameindex as source
+            b2sum_old=${sums[$index]}
+            echo "Old b2sum for $filename: $b2sum_old"
+
+            # if old sum ist notstring SKIP then replace all occurencen os oldsum in PKGBUILD with new sum
+            if [[ $b2sum_old != "SKIP" ]]; then
+              echo "Updating b2sum in PKGBUILD for $filename"
+              sed -i "s/$b2sum_old/$b2sum_new/g" PKGBUILD
+            else
+              echo "Old b2sum is SKIP, not updating PKGBUILD for $filename"
+            fi
+
+            index=$((index + 1))
+          done
+
+          # manual lic check if it changed. LICENSE musst container "Apache 2.0" other wise error maintainer has to act
+          if ! grep -q "Version 2.0" LICENSE || ! grep -q "Apache License" LICENSE; then
+            echo "LICENSE file does not contain 'Apache 2.0', manual intervention needed."
+            exit 1
+          fi
+          echo "LICENSE file is still Apache 2.0, no manual intervention needed."
+          
+          # all good for now need to open new archlinux job to test buidl and install and create srcinfo. makepkg on ubutnu fails
+          echo "DO_MAKEPKG=true" >> $GITHUB_ENV
+          echo "ARCHS=${arch[*]}" >> $GITHUB_ENV
+
+          # make subfolder for artefakt to transfer
+          # transfer data to makepkg job
+          mkdir -p artifacts
+          cp PKGBUILD requirements.toml artifacts/
+
+          tree artifacts
+
+      - name: Transfer artifacts to makepkg job
+        # v5 is latest version that is compatible with act
+        uses: actions/upload-artifact@v5  
+        with:
+          name: makepkg-artifacts
+          path: ${{ env.WORK_DIR }}/${{ env.PKG }}/artifacts/
+
+      - name: Generate build matrix for makepkg job
+        id: generate-matrix
+        working-directory: ${{ env.WORK_DIR }}
+        shell: python
+        run: |
+          import os
+          import json
+
+          print("Generating build matrix for makepkg job")
+
+          # parse arch as py array from bash env variable
+          arch_raw = os.environ.get('ARCHS', '')
+          archs = [a.strip() for a in arch_raw.split() if a.strip()]
+          if len(archs) == 0:
+              print("No architectures found in ARCHS environment variable.")
+              exit(1)
+
+          arch_config = {
+              'x86_64': {'runner': 'ubuntu-latest', 'image': 'archlinux:base-devel'},
+              'aarch64': {'runner': 'ubuntu-24.04-arm', 'image': 'nevuly/archlinux:base-devel'}
+          }
+          
+          matrix = {"include": []}
+          for arch in archs:
+              if arch not in arch_config:
+                  print(f"Unsupported architecture: {arch}")
+                  exit(1)
+              matrix["include"].append({**arch_config[arch], "arch": arch})
+          
+          # store matrix to environment variable for use in makepkg job
+          matrix_json = json.dumps(matrix)
+          print(f"Build matrix: {matrix_json}")
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f"matrix={matrix_json}\n")
+
+  makepkg:
+    runs-on: ubuntu-latest
+    needs: pkgbuild
+
+    container:
+      image: ${{ matrix.image }}
+
+    # TODO if really needed?
+    #if: env.DO_MAKEPKG == 'true'
+
+    env:
+      # abs work dir path to wor in, will be set setup step
+      WORK_DIR: ""
+
+    strategy:
+      #matrix: ${{ fromJSON(needs.pkgbuild.outputs.matrix) }}
+
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+            image: archlinux:base-devel
+          #- runner: ubuntu-24.04-arm
+          #  arch: aarch64
+          #  image: nevuly/archlinux:base-devel
+    
+    steps:
+
+      - name: Dump debug info
+        run: |
+          echo "Matrix (runner, arch, image):"
+          echo "  runner: ${{ matrix.runner }}"
+          echo "  arch: ${{ matrix.arch }}"
+          echo "  image: ${{ matrix.image }}"
+          . /etc/os-release
+          echo "  ID: $ID"
+          echo "  ID_LIKE: $ID_LIKE"
+
+      # TODO use a suitable action or create own
+      # use my action filter-distro to ensure its arch linux
+      - name: Ensure its arch linux
+        run: |
+          if [[ ! -f /etc/os-release ]]; then
+            echo "Not an Arch Linux system: /etc/os-release not found"
+            exit 1
+          fi
+
+          . /etc/os-release
+          if [[ "${ID:-}" != "arch" && "${ID_LIKE:-}" != *"arch"* ]]; then
+            echo "Not an Arch Linux system (ID=${ID:-unknown}, ID_LIKE=${ID_LIKE:-unknown})"
+            exit 1
+          fi
+
+        # TODO create action for this ?! maybe
+      - name: Setup machine for makepkg job
+        run: |
+          work_id=${{ needs.pkgbuild.outputs.work_id }}
+
+          work_dir="$GITHUB_WORKSPACE/${{ env.WORK_ROOT }}/${work_id}/makepkg_${{ matrix.arch }}/${{ env.PKG }}"
+          mkdir -p "$work_dir"
+          echo "WORK_DIR=$work_dir" >> $GITHUB_ENV
+
+          cd "$work_dir"
+
+          pacman -Sy --noconfirm
+          pacman -S --noconfirm --needed nodejs npm rsync
+
+      # TODO use setup-sudo-nopass action create one, with: path, user
+      - name: Ensure work folder is owned by builder user which has sudo NOPASSWD permissions
+        run: |
+          id -u builder &>/dev/null || useradd -m -G wheel builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
+          chmod 0440 /etc/sudoers.d/builder
+
+      - name: Download artifacts from update job
+        # v5 is latest version that is compatible with act
+        uses: actions/download-artifact@v5
+        with:
+          name: makepkg-artifacts
+          path: ${{ env.WORK_DIR }}/package
+
+      - name: "Make .SRCINFO and test build and install"
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          echo "Generating .SRCINFO"
+
+          # TODO try to kee builders data to check on local machine
+          
+          echo "Testing build and install"
+          mkdir -p builder
+          rsync -av --exclude='builder' package/* builder/
+          chown -R builder:builder "builder"
+          cd builder
+          sudo -u builder makepkg --printsrcinfo > .SRCINFO
+          sudo -u builder makepkg -sfi --noconfirm
+          cd ..
+          cp builder/.SRCINFO package/.SRCINFO
+          chown -R $USER:$USER builder
+
+          # grok --version must print version string
+          . ./package/PKGBUILD
+          if ! grok --version | grep -q "$pkgver"; then
+            echo "Error: Installed grok version does not match expected pkgver $pkgver"
+            exit 1
+          fi 
+          echo "Installed grok version matches expected pkgver $pkgver"        
+      
+      - name: Upload finalized set of PKGBUILD files
+        # v5 is latest version that is compatible with act
+        uses: actions/upload-artifact@v5
+        with:
+          name: package-artifacts
+          path: ${{ env.WORK_DIR }}/package/
+          include-hidden-files: true
+  
+  post:
+    runs-on: ubuntu-latest
+    needs: [pkgbuild, makepkg]
+
+    #permissions:
+    #  contents: write
+    #  pull-requests: write
+
+    env:
+      # abs work dir path to wor in, will be set setup step
+      WORK_DIR: ""
+
+    steps:
+
+      - name: Setup runner environment
+        run: |
+          apt update -y
+          apt install rsync tree gh -y
+
+      - name: Setup work dir
+        run: |
+          work_id="${{ needs.pkgbuild.outputs.work_id }}"
+
+          work_dir="$GITHUB_WORKSPACE/${{ env.WORK_ROOT }}/${work_id}/post/"
+          mkdir -p "$work_dir"
+          echo "WORK_DIR=$work_dir" >> $GITHUB_ENV
+          
+          echo "WORK_DIR=$work_dir"
+
+
+
+
+      - name: Copy local repo and reset to main branch
+        if: ${{ env.LOCAL_COPY == 'true' }}
+        run: |
+
+          rsync -av --exclude="${{ env.WORK_ROOT }}" "$GITHUB_WORKSPACE/" "${{ env.WORK_DIR }}repo/"
+          cd "${{ env.WORK_DIR }}repo/"
+
+          if [[ "${{ env.RESET_AND_CLEAN_BEFORE_PUSH_PR }}" == "true" ]]; then
+            echo "Resetting and cleaning local repo"
+
+            git reset --hard HEAD
+            git clean -fdx
+          fi
+
+          git status  
+          
+          # switch branch if notempty env
+          if [[ -n "${{ env.SWITCH_BEFORE_PUSH_PR }}" ]]; then
+            git switch "${{ env.SWITCH_BEFORE_PUSH_PR }}"
+          fi
+
+      - name: Checkout repository
+        if: ${{ env.LOCAL_COPY != 'true' }}
+        uses: actions/checkout@v7
+        with:
+          path: ${{ env.WORK_DIR }}repo/
+
+          # TODO implement copy local repo to work folder if LOCAL_COPY is set to true
+
+      - name: Download artifacts from makepkg job
+        # v5 is latest version that is compatible with act
+        uses: actions/download-artifact@v5
+        with:
+          name: package-artifacts
+          path: ${{ env.WORK_DIR }}package/
+
+      - name: Dump debug info
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+
+          ls -la
+
+      - name: Create update branch and commit changes
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          echo "Creating update branch and committing changes"
+
+
+          # copy all files from package folder to repo folder and add them to git
+          cp -r package/* repo/${{ env.PKG }}/
+
+          cd repo
+          
+          git config set advice.addEmbeddedRepo false
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add .
+          git switch -c ${{ needs.pkgbuild.outputs.update_branch }}
+
+          git commit -m "Update ${{ env.PKG }} to version ${{ needs.pkgbuild.outputs.upstream_version }}"
+
+      - name: Push and PR via github cli
+        if: ${{ env.PUSH_AND_PR == 'true' }}
+        working-directory: ${{ env.WORK_DIR }}repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GIT_TERMINAL_PROMPT: 0 # otherwise git push hangs for ever if invalid auth
+        run: |
+          
+          echo "alive"
+
+          echo "which gh"
+          which gh
+
+          if [[ "${{ env.ACT }}" == "true" ]]; then
+            git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/olwig/pkgbuilds.git
+          fi
+          
+          git push origin ${{ needs.pkgbuild.outputs.update_branch }}
+          
+          echo "alive"
+
+          gh pr create \
+            --title "Update ${{ env.PKG }} to version ${{ needs.pkgbuild.outputs.upstream_version }}" \
+            --body "This pull request updates ${{ env.PKG }} to version ${{ needs.pkgbuild.outputs.upstream_version }}." \
+            --head ${{ needs.pkgbuild.outputs.update_branch }} \
+            --base main
+
+      - name: Greetings, notify via mail
+        run: |
+          echo "Greetings, the workflow has completed successfully."
+          echo "You can check the pull request for details."
