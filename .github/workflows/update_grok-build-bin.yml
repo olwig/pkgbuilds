@@ -148,7 +148,7 @@ jobs:
       - name: Copy local data to work dir if requested
         if: ${{ env.LOCAL_COPY == 'true' }}
         run: |
-          rsync -av \
+          rsync -a \
             --exclude="${{ env.WORK_ROOT }}" \
             "./" "$WORK_DIR/repo/"
           echo "Copied local data to work dir: $WORK_DIR"
@@ -180,6 +180,8 @@ jobs:
         run: |
           branch="${{ steps.define-branch.outputs.update_branch }}" 
           location="${{ env.UPDATE_BRANCH_LOCATION }}"
+          
+          echo "Checking if update branch $branch already exists on ${location}ly"
 
           if [[ "$location" == "remote" ]]; then
             if git ls-remote --heads origin $branch | grep -q $branch; then
@@ -444,7 +446,7 @@ jobs:
           
           echo "Testing build and install"
           mkdir -p builder
-          rsync -av --exclude='builder' package/* builder/
+          rsync -a --exclude='builder' package/* builder/
           chown -R builder:builder "builder"
           cd builder
           sudo -u builder makepkg --printsrcinfo > .SRCINFO
@@ -505,7 +507,7 @@ jobs:
         if: ${{ env.LOCAL_COPY == 'true' }}
         run: |
 
-          rsync -av --exclude="${{ env.WORK_ROOT }}" "$GITHUB_WORKSPACE/" "${{ env.WORK_DIR }}repo/"
+          rsync -a --exclude="${{ env.WORK_ROOT }}" "$GITHUB_WORKSPACE/" "${{ env.WORK_DIR }}repo/"
           cd "${{ env.WORK_DIR }}repo/"
 
           if [[ "${{ env.RESET_AND_CLEAN_BEFORE_PUSH_PR }}" == "true" ]]; then
@@ -550,7 +552,7 @@ jobs:
 
 
           # copy all files from package folder to repo folder and add them to git
-          cp -r package/* repo/${{ env.PKG }}/
+          cp -r package/. repo/${{ env.PKG }}/
 
           cd repo
           
