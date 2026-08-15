@@ -443,6 +443,8 @@ jobs:
           echo "Generating .SRCINFO"
 
           # TODO try to kee builders data to check on local machine
+
+          # TODO use mkpkg -D instead of cd in/out
           
           echo "Testing build and install"
           mkdir -p builder
