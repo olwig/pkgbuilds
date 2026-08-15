@@ -2,10 +2,78 @@ name: sync-aur
 
 on:
   workflow_dispatch:
+
+
+env:
+
+  ACT: false
+
+  # relative path where alls jobs working, realtive to GITHUB_WORKSPACE, due to act --bind --resuse with rootless contsainer
+  # thesteps them jobs them self vreate their ogn sub folde there to work on. best case use random folder thus in case of reuse conainber thei are alweays ne
+  # using --resuse o increase testing speed
+  WORK_ROOT: .github/work
+
+  # if true, work root ist removed from each job, thus resused conainer s dont get messen up
+  WORK_FLUSH: false
     
 jobs:
   sync:
     runs-on: ubuntu-latest
+
+    env:
+
+      # jobs working directory, relative to GITHUB_WORKSPACE. created from steps
+      # in case of ACT=true steps will copy bind data to that, thus the hosts data get not bessed up.
+      # in case of false checkout actions shoudl also work here thus thsu the logis works with act and on github actions
+      # just declare it here, the steps will set it up and use it
+      WORK_DIR: ""
+
     steps:
       - run: |
           echo "I am a skeleton workflow to make this workflow visible in the Actions tab so it can be run on the working branch."
+    
+      - name: Setup runner environment
+        run: |
+          apt update && apt install -y tree rsync
+
+      - name: Flush work root if requested
+        if: env.WORK_FLUSH == 'true'
+        run: |
+          work_root="${{ env.WORK_ROOT }}"
+          if [[ -d "$work_root" ]]; then
+            rm -rf "$work_root"
+          fi
+
+      - name: Create work directory, skip work dir
+        run: |
+          work_root="${{ env.WORK_ROOT }}"
+          job_name="${{ github.job }}"
+          random_name=$( tr -dc A-Za-z0-9 </dev/urandom | head -c 12 )
+
+          work_dir=$work_root/$random_name/$job_name
+          mkdir -p "$work_dir"
+
+          echo "WORK_DIR=$work_dir" >> $GITHUB_ENV
+      
+      - name: Copy files if act is used
+        if: env.ACT == 'true'
+        run: |
+          rsync -a \
+            --exclude='${{ env.WORK_ROOT }}' \
+            . ${{ env.WORK_DIR }}/
+
+      - name: Checkout repository
+        if: env.ACT == 'false'
+        working-directory: ${{ env.WORK_DIR }}
+        run : |
+          echo "TODO implement checkout if on gh actions"
+          exit 1
+
+      - name: Dump work directory structure
+        working-directory: ${{ env.WORK_DIR }}
+        run: |
+          tree -a -I '.git' 
+
+      - name: Sync to AUR
+        working-directory: ${{ env.WORK_DIR }}
+        run: bash .github/scripts/sync-aur.sh
