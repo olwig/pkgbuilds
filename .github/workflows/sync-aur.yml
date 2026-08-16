@@ -58,14 +58,16 @@ jobs:
       - name: Copy files if act is used
         if: env.ACT == 'true'
         run: |
+          mkdir -p "${{ env.WORK_DIR }}/pkg_repo"
           rsync -a \
             --exclude='${{ env.WORK_ROOT }}' \
-            . ${{ env.WORK_DIR }}/
+            . ${{ env.WORK_DIR }}/pkg_repo/
 
       - name: Checkout repository
         if: env.ACT == 'false'
-        working-directory: ${{ env.WORK_DIR }}
+        working-directory: ${{ env.WORK_DIR }}/pkg_repo
         run : |
+          # TODOK check out to pkg_repo sub folder. work root shoudl be empty
           echo "TODO implement checkout if on gh actions"
           exit 1
 
