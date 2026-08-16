@@ -2,6 +2,8 @@ name: sync-aur
 
 on:
   workflow_dispatch:
+  # schedule
+  # push main
 
 
 env:
@@ -28,6 +30,9 @@ jobs:
       # just declare it here, the steps will set it up and use it
       WORK_DIR: ""
 
+      # jobs name to use in bash script
+      JOB_NAME: ${{ github.job }}
+
     steps:
       - run: |
           echo "I am a skeleton workflow to make this workflow visible in the Actions tab so it can be run on the working branch."
@@ -35,39 +40,52 @@ jobs:
       - name: Setup runner environment
         run: |
           apt update && apt install -y tree rsync
+          
+      - name: Flush/create work directory. fill if local/act
+        # TODO use bash script, make it work for act and github actions, thus use env vars and not github vars
+        run: |  
 
-      - name: Flush work root if requested
-        if: env.WORK_FLUSH == 'true'
-        run: |
-          work_root="${{ env.WORK_ROOT }}"
+          # TODO adapt to new sync-aur.sh logic
+          echo "TODO adapt to new sync-aur.sh logic"
+          exit 1
+
+          # TODO adapt to new sync-aur.sh logic
+
+          work_root="$WORK_ROOT"
           if [[ -d "$work_root" ]]; then
             rm -rf "$work_root"
           fi
 
-      - name: Create work directory, skip work dir
-        run: |
-          work_root="${{ env.WORK_ROOT }}"
-          job_name="${{ github.job }}"
-          random_name=$( tr -dc A-Za-z0-9 </dev/urandom | head -c 12 )
+          if [[ -z "${JOB_NAME:-}" ]]; then
+            echo "JOB_NAME is not set, must be local script. Generating a random job name."
+            job_name="job-$(tr -dc a-z0-9 </dev/urandom | head -c 12 || true)"
+            echo "JOB_NAME=$job_name" >> $GITHUB_ENV
+          fi
+
+          job_name="$JOB_NAME"
+          random_name=$( tr -dc a-z0-9 </dev/urandom | head -c 12 || true )
 
           work_dir=$work_root/$random_name/$job_name
           mkdir -p "$work_dir"
 
           echo "WORK_DIR=$work_dir" >> $GITHUB_ENV
-      
-      - name: Copy files if act is used
-        if: env.ACT == 'true'
-        run: |
-          mkdir -p "${{ env.WORK_DIR }}/pkg_repo"
-          rsync -a \
-            --exclude='${{ env.WORK_ROOT }}' \
-            . ${{ env.WORK_DIR }}/pkg_repo/
+
+
+          if [[ -z "${GITHUB_WORKSPACE:-}" && "${ACT:-}" != "true" ]]; then
+            echo "not 
+            
+            mkdir -p "$work_dir/repo"
+            rsync -a \
+              --exclude="$work_root" \
+              . "$work_dir/repo"
+          fi
+          
 
       - name: Checkout repository
         if: env.ACT == 'false'
-        working-directory: ${{ env.WORK_DIR }}/pkg_repo
+        working-directory: ${{ env.WORK_DIR }}/repo
         run : |
-          # TODOK check out to pkg_repo sub folder. work root shoudl be empty
+          # TODOK check out to repo sub folder. work root shoudl be empty
           echo "TODO implement checkout if on gh actions"
           exit 1
 

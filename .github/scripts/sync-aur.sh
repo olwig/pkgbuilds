@@ -7,37 +7,191 @@
 # inputs via env vars (e.g. for direct bash execution):
 # GITHUB_WORKSPACE: the root of the repository
 
-# if not running with act or on gh actions, init the env vars for testing, and simulate all previous steps
-if [[ -z "${GITHUB_WORKSPACE:-}" && "${ACT:-}" != "true" ]]; then
 
-    # wf inputs
-    WORK_FLUSH="true"
-    WORK_ROOT=".github/work"
-    GITHUB_WORKSPACE=$(git rev-parse --show-toplevel)
+# thius script should from from within teh repo containienrg the .github folder
+
+export EXEC_ENVIRONMENT=""
+function determine_exec_environment() {
+    local exec_env=""
+    if [[ -z "${GITHUB_WORKSPACE:-}" && "${ACT:-}" != "true" && ${GITHUB_ACTIONS,-} != "true" ]]; then
+        exec_env="bash"
+    elif [[ -d "${GITHUB_WORKSPACE:-}" && "${ACT:-}" == "true" && "$GITHUB_WORKSPACE" == $PWD && ${GITHUB_ACTIONS,-} == "true" ]]; then
+        exec_env="act"
+    elif [[ -d "${GITHUB_WORKSPACE:-}" && "${ACT:-}" != "true" && "$GITHUB_WORKSPACE" == $PWD && -z "$(ls -A $PWD)" && ${GITHUB_ACTIONS,-} == "true" ]]; then
+        exec_env="gha"
+    else
+        echo "Error: Unknown execution environment. GITHUB_WORKSPACE: ${GITHUB_WORKSPACE:-}, ACT: ${ACT:-}, PWD: $PWD"
+        exit 1
+    fi
+    EXEC_ENVIRONMENT="$exec_env"
+    echo "$EXEC_ENVIRONMENT"
+}
+
+function get_git_root() {
+  local dir="${1:-.}"
+  git -C "$dir" rev-parse --show-toplevel 2>/dev/null || true
+}
+
+function is_git_repo() {
+  local dir="${1:-.}"
+  [[ -d "$(get_git_root "$dir")" ]]
+}
+
+function ensure_github_envs() {
+    echo "=> Ensuring github actions environment variables are set..."
+
+    # we set only whats needed
+
+    # defaults
+    local github_repo="olwig/pkgbuilds"
+    local ref="refs/heads/main"
+    local ref_name="main"
+    local ref_type="branch"
+    local job_id="sync-aur"
+
+    # ensure GITHUB_REPOSITORY
+    export GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-$github_repo}"
+    export GITHUB_REF="${GITHUB_REF:-$ref}"
+    export GITHUB_REF_NAME="${GITHUB_REF_NAME:-$ref_name}"
+    export GITHUB_REF_TYPE="${GITHUB_REF_TYPE:-$ref_type}"
+    export GITHUB_JOB="${GITHUB_JOB:-$job_id}"
+
+    # ensure GITHUB_ENV
+    if [[ -z "${GITHUB_ENV:-}" || ! -w "${GITHUB_ENV:-}" ]]; then
+        GITHUB_ENV=$(mktemp)
+        export GITHUB_ENV
+    fi
+
+    # ensure GITHUB_OUTPUT
+    if [[ -z "${GITHUB_OUTPUT:-}" || ! -w "${GITHUB_OUTPUT:-}" ]]; then
+        GITHUB_OUTPUT=$(mktemp)
+        export GITHUB_OUTPUT
+    fi
+
+    # ensure GITHUB_WORKSPACE
+    if [[ -z "${GITHUB_WORKSPACE:-}" || ! -d "${GITHUB_WORKSPACE:-}" ]]; then
+        
+        if [[ -d "$PWD/.github" ]]; then
+            # local bash, or act with --bind
+            echo "PWD has .github, take as GITHUB_WORKSPACE."
+            GITHUB_WORKSPACE="$PWD"
+        elif [[ -z $(ls -A "$PWD") ]]; then
+            # act without bind or gha
+            echo "PWD is empty, clone repo to PWD and take as GITHUB_WORKSPACE."
+            GITHUB_WORKSPACE="$PWD"
+
+            git clone "https://github.com/$GITHUB_REPOSITORY.git" "$GITHUB_WORKSPACE" || {
+                echo "Error: Failed to clone repository $GITHUB_REPOSITORY into $GITHUB_WORKSPACE."
+                exit 1
+            }
+
+            git checkout "$GITHUB_REF_NAME" || {
+                echo "Error: Failed to checkout branch $GITHUB_REF_NAME in $GITHUB_WORKSPACE."
+                exit 1
+            }
+        else
+            echo "Error: Current directory ($PWD) is not empty and does not contain .github folder. Cannot determine GITHUB_WORKSPACE."
+            exit 1
+        fi
+
+        echo "GITHUB_WORKSPACE set to: $GITHUB_WORKSPACE"
+        cd "$GITHUB_WORKSPACE"
+        export GITHUB_WORKSPACE
+    fi
+
+
+    # dump'em
+    env | grep 'GITHUB_' | sort
+}
+
+function ensure_workflow_envs() {
+    echo "=> Ensuring workflow environment variables are set..."
+
+    # defaults
+    local work_root=".github/work"
+    local work_flush="true"
+
+    export WORK_ROOT="${WORK_ROOT:-$work_root}"
+    export WORK_FLUSH="${WORK_FLUSH:-$work_flush}"
+    export WORK_DIR="" # just declare, will be set later
+
+    env | grep 'WORK_' | sort
+}
+
+function ensure_workspace() {
+    echo "=> Ensuring current working directory is valid GITHUB_WORKSPACE as git root ..."
+
+    # workspace must be working directory, with or without data don't care
+    if [[ ! "$PWD" == "$GITHUB_WORKSPACE" ]]; then
+        echo "Error: Current working directory ($PWD) is not the same as GITHUB_WORKSPACE ($GITHUB_WORKSPACE)."
+        exit 1
+    fi
+
+    # bust be root of git repo
+    git_root="$(get_git_root)" || true
+    if [[ "$git_root" != "$GITHUB_WORKSPACE" ]]; then
+        echo "Error: GITHUB_WORKSPACE ($GITHUB_WORKSPACE) is not the git root ($git_root)."
+        exit 1
+    fi
+}
+
+
+
+function export_github_env() {
+    local var_name="$1"
+    local var_value="$2"
+    echo "$var_name=$var_value" >> "$GITHUB_ENV"
+    export "$var_name=$var_value"
+}
+
+function set_github_output() {
+    local var_name="$1"
+    local var_value="$2"
+    echo "$var_name=$var_value" >> "$GITHUB_OUTPUT"
+}
+
+function ensure_work_dir() {
+    echo "=> Ensuring work directory is set up..."
 
     # flush work if requested
     if [[ "$WORK_FLUSH" == "true" ]]; then
         rm -rf "$GITHUB_WORKSPACE/$WORK_ROOT"
+        echo "Flushed work root: $GITHUB_WORKSPACE/$WORK_ROOT"
     fi
-    
-    # create unique work dir
+
+
+        
+    # create unique work id for current run
+    # TODO add env to override it with fixed value
     work_id=$(tr -dc a-z0-9 </dev/urandom | head -c 12 || true)
-    WORK_DIR="$WORK_ROOT/$work_id/sync"
+    WORK_DIR="$WORK_ROOT/$work_id/$GITHUB_JOB"
     mkdir -p "$GITHUB_WORKSPACE/$WORK_DIR"
-
-    # copy data (checkout) repo to workdir sub
-    cd "$GITHUB_WORKSPACE"
-    rsync -a --exclude "$WORK_ROOT" . "$WORK_DIR/pkg_repo/"
-
-    echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
-    echo "WORK_ROOT: $WORK_ROOT"
-    echo "WORK_DIR: $WORK_DIR"
+    export_github_env "WORK_DIR" "$WORK_DIR"
+    echo "Work directory set to: $GITHUB_WORKSPACE/$WORK_DIR"
 
 
+    # copy repo to actual work dir, thus we dont mness with the host in case of act --bind and bash exec
     cd "$GITHUB_WORKSPACE/$WORK_DIR"
+    rsync -a --exclude "$WORK_ROOT" "$GITHUB_WORKSPACE/" repo/
+}
 
-    tree -a -L 3
-fi
+determine_exec_environment
+echo "Execution environment: $EXEC_ENVIRONMENT"
+
+ensure_github_envs
+export_github_env "EXEC_ENVIRONMENT" "$EXEC_ENVIRONMENT"
+ensure_workflow_envs
+
+ensure_workspace
+
+
+ensure_work_dir
+
+
+
+tree -a -L 3
+
+exit 0
 
 # globals to be used in functions, will be set in the main loop
 declare -A aur_versions
@@ -45,7 +199,7 @@ declare -A pkg_aur_map
 
 init_pkg_aur_map() {
     
-    mapping_file="pkg_repo/.github/aur/mapping.env"
+    mapping_file="repo/.github/aur/mapping.env"
     if [[ ! -f "$mapping_file" ]]; then
         echo "No mapping.env file found. Nothing to sync."
         return 0
@@ -69,7 +223,7 @@ init_pkg_aur_map() {
 init_aur_versions() {
     # fetch aur pkg infos via rpc, if json data already set (debug) don't fetch new, due to rate limit 
     aur_rpc_json=""
-    rpc_cache_file="pkg_repo/.github/aur/debug_rpc_cache.json"
+    rpc_cache_file="repo/.github/aur/debug_rpc_cache.json"
     if [[ -f "$rpc_cache_file" ]]; then
         aur_rpc_json=$(cat "$rpc_cache_file")
     else
@@ -135,7 +289,7 @@ normalize_version_for_compare() {
 
 pkgbuild_version() {
     local pkg="$1"
-    local pkbuild_file="pkg_repo/$pkg/PKGBUILD"
+    local pkbuild_file="repo/$pkg/PKGBUILD"
     if [[ ! -f "$pkbuild_file" ]]; then
         echo "Error: PKGBUILD file not found for package $pkg."
         exit 1
@@ -161,7 +315,7 @@ ensure_pkgs_exist() {
     local pkg="$1"
     local aur_pkg="$2"
 
-    if [[ ! -d "pkg_repo/$pkg" ]]; then
+    if [[ ! -d "repo/$pkg" ]]; then
         echo "Error: Local package folder $pkg does not exist."
         exit 1
     fi
@@ -275,7 +429,7 @@ sync_pkg() {
     rsync -av \
         --exclude '.git' \
         --exclude '.github' \
-        "pkg_repo/$pkg/" "aur_repo/$aur_pkg/"
+        "repo/$pkg/" "aur_repo/$aur_pkg/"
 
     echo "$GITHUB_WORKSPACE/$WORK_DIR/aur_repo/$aur_pkg/"
 }
