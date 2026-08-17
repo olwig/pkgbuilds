@@ -11,6 +11,9 @@ license=('Apache-2.0')
 provides=('grok')
 conflicts=('grok')
 options=('!strip' '!debug' '!emptydirs')
+
+# TODO remove clang
+# TODO check if perl can be removed too
 makedepends=("git" "curl" "perl" "clang")
 backup=('etc/grok/requirements.toml')
 
