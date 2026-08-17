@@ -2,3 +2,4 @@ grok-*-linux-*
 *.pkg.tar.*
 src/
 pkg/
+LICENSE.grok
