@@ -1,4 +1,4 @@
-grok-*-linux-*
+grok-build/
 *.pkg.tar.*
 src/
 pkg/
