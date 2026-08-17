@@ -19,7 +19,7 @@ backup=('etc/grok/requirements.toml')
 source_x86_64=("grok-$pkgver-x86_64::https://x.ai/cli/grok-${pkgver}-linux-x86_64")
 source_aarch64=("grok-$pkgver-aarch64::https://x.ai/cli/grok-${pkgver}-linux-aarch64")
 source=(
-  "LICENSE::https://raw.githubusercontent.com/xai-org/grok-build/refs/heads/main/LICENSE"
+  "LICENSE.grok::https://raw.githubusercontent.com/xai-org/grok-build/refs/heads/main/LICENSE"
   "requirements.toml"
 )
 
@@ -36,7 +36,7 @@ b2sums=(
 package() {
 
   install -Dm755 "$srcdir/grok-$pkgver-$CARCH" "$pkgdir/usr/bin/grok"
-  install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$srcdir/LICENSE.grok" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 "$srcdir/requirements.toml" "$pkgdir/etc/grok/requirements.toml"
 
   install -d "$pkgdir/usr/share/bash-completion/completions"
