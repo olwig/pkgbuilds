@@ -84,15 +84,3 @@ jobs:
           # print the list of packages to be built
           print("Packages to build:", pkgs)
           print("Git ref to build from:", ref)
-
-          # store pkgs and ref for next steps, GITHUB_OUTPUT. each value per leine
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"pkgs={json.dumps(pkgs)}\n")
-              f.write(f"ref={ref}\n")
-
-          #dump GITHUB_OUTPUT for debugging
-          print("GITHUB_OUTPUT contents: " + os.environ['GITHUB_OUTPUT'])
-          with open(os.environ['GITHUB_OUTPUT'], 'r') as f:
-              print(f.read())
-          
-          
