@@ -1,0 +1,6 @@
+grok-*-aarch64
+grok-*-x86_64
+*.pkg.tar.*
+src/
+pkg/
+LICENSE.grok

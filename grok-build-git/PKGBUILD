@@ -2,9 +2,8 @@
 
 pkgname=grok-build-git
 _pkgname=grok-build
-pkgver=r29.eb267fe
-# real +1 for debug workflow
-pkgrel=2
+pkgver=r33.d71f6e0
+pkgrel=1
 pkgdesc="SpaceXAI's coding agent harness and TUI. Fullscreen, mouse interactive, extensible."
 arch=('x86_64' 'aarch64')
 url="https://x.ai/build"
@@ -12,6 +11,9 @@ license=('Apache-2.0')
 provides=('grok')
 conflicts=('grok')
 options=('!strip' '!debug' '!emptydirs')
+
+# TODO remove clang
+# TODO check if perl can be removed too
 makedepends=("git" "curl" "perl" "clang")
 backup=('etc/grok/requirements.toml')
 
