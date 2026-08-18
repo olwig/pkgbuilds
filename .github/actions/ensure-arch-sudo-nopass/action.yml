@@ -1,0 +1,27 @@
+name: ensure-arch-sudo-nopass
+description: Ensure sudo exists on Arch Linux, configure NOPASSWD for current user, and set workspace ownership.
+
+inputs:
+  user:
+    description: 'User to configure sudo NOPASSWD for and set workspace ownership'
+    required: false
+    default: 'builder'
+
+  path:
+    description: 'Path to set ownership for'
+    required: false
+    default: ${{ github.workspace }}
+
+runs:
+  using: composite
+  steps:
+    - name: Ensure sudo workspace ownership with NOPASSWD
+      shell: bash
+      run: |
+        pacman -S --noconfirm --needed sudo
+
+        id -u ${{ inputs.user }} &>/dev/null || useradd -m -G wheel ${{ inputs.user }}
+        echo "${{ inputs.user }} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/${{ inputs.user }}
+        chmod 0440 /etc/sudoers.d/${{ inputs.user }}
+
+        chown -R ${{ inputs.user }}:${{ inputs.user }} "${{ inputs.path }}"

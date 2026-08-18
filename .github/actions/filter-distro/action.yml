@@ -1,0 +1,84 @@
+name: 'Check OS Distro'
+description: 'Reads ID and ID_LIKE from /etc/os-release and optionally checks against an expected value'
+author: 'you'
+
+inputs:
+  distro:
+    description: 'Expected distro ID (e.g. debian, ubuntu, rhel, fedora, arch). Leave empty to only read values.'
+    required: false
+    default: ''
+  exit:
+    description: 'Fail the step (exit 1) if the expected distro does not match'
+    required: false
+    default: 'false'
+
+outputs:
+  id:
+    description: 'Actual ID from os-release'
+    value: ${{ steps.check.outputs.id }}
+  id_like:
+    description: 'Actual ID_LIKE from os-release'
+    value: ${{ steps.check.outputs.id_like }}
+  match:
+    description: 'true if the expected distro matches (or no distro was given), otherwise false'
+    value: ${{ steps.check.outputs.match }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check Distro
+      id: check
+      shell: bash
+      env:
+        DISTRO: ${{ inputs.distro }}
+        EXIT: ${{ inputs.exit }}
+      run: |
+        set -euo pipefail
+
+        EXPECTED="${DISTRO,,}"
+        DO_EXIT="${EXIT,,}"
+
+        if [[ -f /etc/os-release ]]; then
+          . /etc/os-release
+        elif [[ -f /usr/lib/os-release ]]; then
+          . /usr/lib/os-release
+        else
+          echo "ERROR: /etc/os-release not found" >&2
+          exit 1
+        fi
+
+        ID="${ID:-linux}"
+        ID_LIKE="${ID_LIKE:-}"
+
+        ID="${ID,,}"
+        ID_LIKE="${ID_LIKE,,}"
+
+        echo "id=$ID" >> "$GITHUB_OUTPUT"
+        echo "id_like=$ID_LIKE" >> "$GITHUB_OUTPUT"
+
+        MATCH="false"
+
+        if [[ -z "$EXPECTED" ]]; then
+          MATCH="true"
+        elif [[ "$ID" == "$EXPECTED" ]]; then
+          MATCH="true"
+        else
+          for like in $ID_LIKE; do
+            if [[ "$like" == "$EXPECTED" ]]; then
+              MATCH="true"
+              break
+            fi
+          done
+        fi
+
+        echo "match=$MATCH" >> "$GITHUB_OUTPUT"
+
+        echo "ID=$ID"
+        echo "ID_LIKE=$ID_LIKE"
+        echo "expected=$EXPECTED"
+        echo "match=$MATCH"
+
+        if [[ "$DO_EXIT" == "true" && "$MATCH" != "true" ]]; then
+          echo "ERROR: expected distro '$EXPECTED' not found" >&2
+          exit 1
+        fi

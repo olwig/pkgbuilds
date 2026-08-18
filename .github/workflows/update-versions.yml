@@ -91,6 +91,12 @@ jobs:
               title: `New grok-build version: ${version}`,
               body: `@olwig\n\nNew version found: **${version}**\n\nPlease update the PKGBUILD for \`grok-build-bin\`.`
             });
+
+      # TODO as composite action or callable workflow
+      - name: Update PKGBUILD
+        if: steps.compare.outputs.has_update == 'true'
+        run: |
+          # TODO
             
   grok-build:
     runs-on: ubuntu-latest
