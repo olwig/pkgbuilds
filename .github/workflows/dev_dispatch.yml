@@ -1,0 +1,12 @@
+name: dev_dispatch-bash
+
+on:
+  workflow_dispatch:
+    
+jobs:
+  skeleton:
+    runs-on: ubuntu-latest
+
+    steps:
+      - run: |
+          echo "Declared this workflow in main branch!"
