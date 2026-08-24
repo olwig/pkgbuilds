@@ -1,0 +1,18 @@
+FROM archlinux:base-devel
+
+RUN <<EOF
+pacman -Syu --noconfirm --needed sudo fish less git base-devel
+useradd -m -G wheel user
+echo "%wheel ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+sudo -u user bash -c '
+  cd /home/user
+  curl -L -o paru.tar.gz https://aur.archlinux.org/cgit/aur.git/snapshot/paru.tar.gz
+  tar xzf paru.tar.gz
+  cd paru
+  makepkg -si --noconfirm
+'
+EOF
+
+USER user
+CMD ["fish"]

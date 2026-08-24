@@ -1,0 +1,21 @@
+# version: format version of this repo.yml file; defaults to 0 if omitted
+# packages: map of package definitions; each key is the package name and matches packages/<pkg_name>
+# each package must define at least a type that controls how it is managed and synced
+# sync: enables automatic sync when true; defaults to false when omitted
+
+version: 0
+packages:
+
+  grok-build:
+    type: local   
+    sync: false
+    local: 
+      test: true
+
+  grok-build-bin:
+    type: subtree
+    sync: true
+    subtree:
+      aur_name: grok-build-bin
+      remote: ssh://aur@aur.archlinux.org/grok-build-bin.git
+      secret_env: AUR_SSH_KEY

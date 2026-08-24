@@ -1,2 +1,4 @@
 --env WORK_FLUSH=true
+--env WF_DEBUG=true
 --bind
+--pull=false

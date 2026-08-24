@@ -19,3 +19,14 @@ paru -Sya
 ```
 
 Afterwards you can install packages from this repo with `paru -S <pkgname>`.
+
+## Troubleshooting
+
+If you run into problems with this repo, remove the paru cache and refresh again:
+
+```bash
+rm -rf ~/.cache/paru/*
+paru -Sya
+```
+
+

@@ -1,3 +1,0 @@
-post_install() {
-    echo "DEBUG tztz jtz j DEBUG"
-}
