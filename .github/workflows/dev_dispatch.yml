@@ -7,5 +7,33 @@ jobs:
   skeleton:
     runs-on: ubuntu-latest
 
+    container:
+      image: 'archlinux:base-devel'
+
+    env:
+      ACT: false
+      WF_DEBUG: true
+
     steps:
-      - run: ./scripts/workflow.sh
+
+      - name: setup-archlinux
+        run: |
+          echo "setting up archlinux container for workflow"
+          pacman -Syu --noconfirm
+
+          # TODO mode to sh libs
+          pacman -S --noconfirm go-yq git
+
+      - name: dump
+        run: |
+          echo "ACT: ${{ env.ACT }}"
+          echo "GITHUB_WORKSPACE: ${{ github.workspace }}"
+          echo "PWD: $PWD"
+          echo "ls -A PWD:"
+          ls -A $PWD
+
+      - name: checkout
+        if: ${{ env.ACT != 'true' }}
+        uses: actions/checkout@v3
+
+      - run: ./scripts/wf_check-for-updates.sh

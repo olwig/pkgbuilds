@@ -2,7 +2,7 @@
 
 pkg_name="grok-build"
 
-. ./scripts/package.sh
+. ./scripts/pkg_lib.sh
 
 
 pkg_name() {

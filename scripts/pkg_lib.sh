@@ -142,7 +142,7 @@ pkg_echo() {
     )
 
     prefix="${emoji_map[$type]:-}"
-    echo "$prefix $pkg_name: $msg"
+    echo "$prefix ${pkg_name:-unset}: $msg"
 }
 
 # lib echos if pkg_debug is true

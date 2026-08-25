@@ -3,24 +3,32 @@
 set -euo pipefail
 
 # Purpose:
-# This script prepares a consistent workspace for each job, whether it runs in
-# GitHub Actions, with act, or locally via bash.
+# This script prepares a consistent workspace for each job across three execution modes:
+#
+# 1. GitHub Actions (as a step after checkout):
+#    - Repository data is present in GITHUB_WORKSPACE.
+#    - All environment variables (GITHUB_WORKSPACE, GITHUB_RUN_ID, etc.) are set by GHA.
+#
+# 2. act --bind (as a step):
+#    - The host folder is mounted directly into GITHUB_WORKSPACE.
+#    - Repository data and environment variables are present, same as GHA.
+#
+# 3. Local bash execution:
+#    - Repository data is present, but workflow environment variables are NOT set.
+#    - This script simulates the missing environment variables for local runs.
 #
 # Behavior:
 # - Validates and initializes the expected workspace layout.
-# - Ensures required workflow environment variables are set.
+# - Simulates required workflow environment variables if not already set (local mode).
 # - Creates isolated run/job directories under work/ to avoid cross-run interference.
 # - Provides a per-job repository copy at:
 #     work/<run_id>/<job_id>/repo
 #
-# Rationale:
-# When using act --bind (or local execution), the host folder may be mounted
-# directly into GITHUB_WORKSPACE. To avoid accidental edits to source files,
-# all workflow operations run inside WORK_ROOT and per-job WORK_DIR.
-#
 # Result:
 # After this script completes, the process runs from GITHUB_WORKSPACE and
 # WORK_DIR points to the current job's isolated working directory.
+
+# TODO should be reusable across multiple gh projects as workflow library
 
 
 export WF_ENVIRONMENT=${WF_ENVIRONMENT:-}
@@ -54,28 +62,23 @@ wf_ensure_cmds() {
    
 }
 
-determine_exec_environment() {
-    local exec_env=""
-    if [[ -z "${GITHUB_WORKSPACE:-}" && "${ACT:-}" != "true" && ${GITHUB_ACTIONS:-} != "true" ]]; then
-        exec_env="bash"
-    elif [[ -d "${GITHUB_WORKSPACE:-}" && "${ACT:-}" == "true" && "$GITHUB_WORKSPACE" == $PWD && ${GITHUB_ACTIONS,-} == "true" ]]; then
-        exec_env="act"
-    elif [[ -d "${GITHUB_WORKSPACE:-}" && "${ACT:-}" != "true" && "$GITHUB_WORKSPACE" == $PWD && -z "$(ls -A $PWD)" && ${GITHUB_ACTIONS,-} == "true" ]]; then
-        exec_env="gha"
-    else
-        echo "Error: Unknown execution environment. GITHUB_WORKSPACE: ${GITHUB_WORKSPACE:-}, ACT: ${ACT:-}, PWD: $PWD"
-        exit 1
-    fi
-    WF_ENVIRONMENT="$exec_env"
-
-    wf_echo_debug "Determined execution environment: $WF_ENVIRONMENT"
-
-    echo "$WF_ENVIRONMENT"s
-}
 
 wf_ensure_environment() {
     if [[ -z "${WF_ENVIRONMENT:-}" ]]; then
-        determine_exec_environment
+        local exec_env=""
+        if [[ -z "${GITHUB_WORKSPACE:-}" && "${ACT:-}" != "true" && ${GITHUB_ACTIONS:-} != "true" ]]; then
+            exec_env="bash"
+        elif [[ -d "${GITHUB_WORKSPACE:-}" && "${ACT:-}" == "true" && "$GITHUB_WORKSPACE" == $PWD && ${GITHUB_ACTIONS,-} == "true" ]]; then
+            exec_env="act"
+        elif [[ -d "${GITHUB_WORKSPACE:-}" && "${ACT:-}" != "true" && "$GITHUB_WORKSPACE" == $PWD && ${GITHUB_ACTIONS,-} == "true" ]]; then
+            exec_env="gha"
+        else
+            echo "Error: Unknown execution environment. GITHUB_WORKSPACE: ${GITHUB_WORKSPACE:-}, ACT: ${ACT:-}, PWD: $PWD"
+            exit 1
+        fi
+        WF_ENVIRONMENT="$exec_env"
+
+        wf_echo_debug "Determined execution environment: $WF_ENVIRONMENT"
     fi
 }
 
@@ -108,6 +111,11 @@ wf_is_bash() {
 
 wf_ensure_github_envs() {
     echo "=> Ensuring github actions environment variables are set..."
+
+    if wf_is_gha > /dev/null || wf_is_act > /dev/null; then
+        echo "Running in GitHub Actions or act environment. Using existing GITHUB_* variables."
+        return 0
+    fi
 
     # we set only whats needed
 
@@ -154,30 +162,11 @@ wf_ensure_github_envs() {
     # ensure GITHUB_WORKSPACE
     if [[ -z "${GITHUB_WORKSPACE:-}" ]]; then
         
-        if [[ -d "$PWD/.github" ]]; then
-            # local bash, or act with --bind
-            echo "PWD has .github, take as GITHUB_WORKSPACE."
-            GITHUB_WORKSPACE="$PWD"
-        elif [[ -z $(ls -A "$PWD") ]]; then
-            # act without bind or gha
-            echo "PWD is empty, clone repo to PWD and take as GITHUB_WORKSPACE."
-            GITHUB_WORKSPACE="$PWD"
-
-            git clone "https://github.com/$GITHUB_REPOSITORY.git" "$GITHUB_WORKSPACE" || {
-                echo "Error: Failed to clone repository $GITHUB_REPOSITORY into $GITHUB_WORKSPACE."
-                exit 1
-            }
-
-            git checkout "$GITHUB_REF_NAME" || {
-                echo "Error: Failed to checkout branch $GITHUB_REF_NAME in $GITHUB_WORKSPACE."
-                exit 1
-            }
-        else
-            echo "Error: Current directory ($PWD) is not empty and does not contain .github folder. Cannot determine GITHUB_WORKSPACE."
+        if [[ -z $(ls -A "$PWD") ]]; then
+            echo "Error: Current working directory ($PWD) is empty. Please ensure it contains the repository data."
             exit 1
-        fi
-
-        echo "GITHUB_WORKSPACE set to: $GITHUB_WORKSPACE"
+        fi  
+        GITHUB_WORKSPACE="$PWD"
         cd "$GITHUB_WORKSPACE"
         export GITHUB_WORKSPACE
 
@@ -186,6 +175,9 @@ wf_ensure_github_envs() {
         exit 1
     elif [[ $GITHUB_WORKSPACE != "$PWD" ]]; then
         echo "Error: GITHUB_WORKSPACE ($GITHUB_WORKSPACE) is set but does not match current working directory ($PWD)."
+        exit 1
+    elif [[ -z $(ls -A "$GITHUB_WORKSPACE") ]]; then
+        echo "Error: GITHUB_WORKSPACE ($GITHUB_WORKSPACE) is empty. Please ensure it contains the repository data."
         exit 1
     fi
 
@@ -265,17 +257,9 @@ wf_check() {
     wf_echo_debug "is_gha: $(wf_is_gha)"
     wf_echo_debug "is_bash: $(wf_is_bash)"
 
-
-    if [[ "$WF_ALLOW_WORKTREE" == "true" ]] ; then
-        if ! is_git_worktree "$GITHUB_WORKSPACE" && ! is_git_repo "$GITHUB_WORKSPACE"; then
-            wf_echo "Error: GITHUB_WORKSPACE ($GITHUB_WORKSPACE) is not a git worktree or a git repository." "fatal"
-            exit 1
-        fi
-    else
-        if ! is_git_repo "$GITHUB_WORKSPACE"; then
-            wf_echo "Error: GITHUB_WORKSPACE ($GITHUB_WORKSPACE) is not a git repository." "fatal"
-            exit 1
-        fi
+    if ! is_git_repo ; then
+        wf_echo "Error: GITHUB_WORKSPACE ($GITHUB_WORKSPACE) is not a git repository." "fatal"
+        exit 1
     fi
 
     wf_echo "$func_msg ✅" "arrow-right"
@@ -297,18 +281,18 @@ get_git_root() {
 
 is_git_repo() {
   local dir="${1:-$PWD}"
-  [[ -d "$(get_git_root "$dir")" ]]
-}
 
-is_git_worktree() {
-  local dir="${1:-$PWD}"
-  [[ -f "$dir/.git" && "$(cat "$dir/.git")" == gitdir:* ]]
+  # TODO move some where else or fix via other way
+  git config --global --add safe.directory '$dir'
+
+
+  git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1
 }
 
 random_id() {
     local charset="a-zA-Z0-9"
     local length="${1:-12}"
-    tr -dc "$charset" </dev/urandom | head -c "$length" || true
+    tr -dc "$charset" </dev/urandom | head -c "$length" 2>/dev/null || true
 }
 
 timestamp_id() {
