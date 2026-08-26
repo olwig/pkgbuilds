@@ -20,6 +20,15 @@ paru -Sya
 
 Afterwards you can install packages from this repo with `paru -S <pkgname>`.
 
+## Packages
+
+- grok-build-bin
+  https://aur.archlinux.org/packages/grok-build-bin
+- grok-build
+  
+- grok-build-git
+  https://aur.archlinux.org/packages/grok-build-git
+
 ## License
 
 - Root (workflows, scripts, actions, etc.) → **MIT**  

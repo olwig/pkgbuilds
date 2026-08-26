@@ -1,8 +1,8 @@
 # Maintainer: Olaf Wriggers <olaf@olwig.xyz>
 
-pkgname=grok-build-git
-_pkgname=grok-build
-pkgver=r38.77cd7eb
+pkgname=grok-build
+_pkgname=$pkgname
+pkgver=1.0.5
 pkgrel=1
 pkgdesc="SpaceXAI's coding agent harness and TUI. Fullscreen, mouse interactive, extensible."
 arch=('x86_64' 'aarch64')
@@ -12,11 +12,30 @@ provides=('grok')
 conflicts=('grok')
 options=('!strip' '!debug' '!emptydirs')
 
-makedepends=("git" "curl")
+makedepends=("git" "curl") # "perl" "clang")
 backup=('etc/grok/requirements.toml')
 
+# Upstream does not publish stable GitHub tags/releases.
+# Map package versions manually by locating:
+#   crates/codegen/xai-grok-shell/changelogs/<version>.md
+# and then confirming the corresponding commit has the expected version in:
+#   crates/codegen/xai-grok-pager-bin/Cargo.toml
+#
+# Note: This mapping is not fully automatable because one commit may include
+# multiple changelog version entries. Take first commit of the day that has the 
+# correct version in Cargo.toml. If multiple commits on the same day, take the first one.
+#
+# Cargo.toml reference:
+# [package]
+# name = "xai-grok-pager-bin"
+# version = "<version>"
+# edition.workspace = true
+# license = "Apache-2.0"
+
+_commit="9fabadea800fa6e2ed8ec91c4f45f02b7e2504f4"
+
 source=(
-  "$_pkgname::git+https://github.com/xai-org/grok-build.git"
+  "$_pkgname::git+https://github.com/xai-org/grok-build.git#commit=$_commit"
   "requirements.toml"
 )
 
@@ -24,11 +43,6 @@ b2sums=(
   "SKIP"
   "4d37a050b4fa861b2ee076940908f4dfef7419e6297425bb3dfe6c26fcb9440b01befff1837451b9bed194ee45a3f52e30b040bd356b32a5bb178ede6aea694e"
 )
-
-pkgver() {
-  cd "$srcdir/$_pkgname"
-  printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
-}
 
 # TODO default "ultra" sandbox -> https://docs.x.ai/build/features/sandbox
 # TODO restrict with explicit local grok user
@@ -42,6 +56,8 @@ prepare() {
     echo "License mismatch: $cargo_toml license is $upstream_license, but PKGBUILD license is $license"
     exit 1
   fi
+
+  # TODO check if version is in source
   # TODO check also LICENSE file
   
   export RUSTUP_HOME="$srcdir/rustup"
