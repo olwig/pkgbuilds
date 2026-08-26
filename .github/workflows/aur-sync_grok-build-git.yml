@@ -1,0 +1,106 @@
+name: aur-sync_grok-build-git
+
+on:
+  #schedule:
+  #  - cron: '0 8 * * *' 
+  workflow_dispatch:
+    
+jobs:
+  aur-sync:
+    runs-on: ubuntu-latest
+
+    env:
+      AUR_ED25519_GITHUB: ${{ secrets.AUR_ED25519_GITHUB }}
+      GIT_NAME: ${{ secrets.GIT_NAME }}
+      GIT_EMAIL: ${{ secrets.GIT_EMAIL }}
+      DO_SYNC: false
+
+    steps:
+      - name: Prepare runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rsync
+
+      - name: Setup AUR and clone repo
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$AUR_ED25519_GITHUB" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          cat > ~/.ssh/config << EOF
+            Host aur.archlinux.org
+              IdentityFile ~/.ssh/id_ed25519
+              IdentitiesOnly yes
+              User aur
+          EOF
+
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
+
+          git clone ssh://aur@aur.archlinux.org/grok-build-git.git aur/
+
+      - name: Checkout github repo
+        uses: actions/checkout@v3
+        with:
+          path: repo/
+
+      - name: Check data
+        run: |
+          if [[ ! -f aur/PKGBUILD ]]; then
+            echo "PKGBUILD not found in the cloned repository. Exiting."
+            exit 1
+          fi
+
+          if [[ ! -f repo/grok-build-git/PKGBUILD ]]; then
+            echo "PKGBUILD not found in the checked-out repository. Exiting."
+            exit 1
+          fi
+
+          echo "ls -A aur:"
+          echo "--------------------"
+          ls -A aur
+
+          echo ""
+
+          echo "ls -A repo/grok-build-git:"
+          echo "--------------------"
+          ls -A repo/grok-build-git
+
+          repo_pkgver=$(grep -E '^pkgver=' repo/grok-build-git/PKGBUILD | cut -d '=' -f 2)
+          repo_pkgtel=$(grep -E '^pkgrel=' repo/grok-build-git/PKGBUILD | cut -d '=' -f 2)
+          repo_version="$repo_pkgver-$repo_pkgtel"
+          echo "Repository version: $repo_version"
+
+          aur_pkgver=$(grep -E '^pkgver=' aur/PKGBUILD | cut -d '=' -f 2)
+          aur_pkgtel=$(grep -E '^pkgrel=' aur/PKGBUILD | cut -d '=' -f 2)
+          aur_version="$aur_pkgver-$aur_pkgtel"
+          echo "AUR version: $aur_version"
+
+          # basic check for now
+          if [[ "$repo_version" == "$aur_version" ]]; then
+            echo "Versions are the same. No sync needed."
+            exit 0
+          fi
+
+          echo "DO_SYNC=true" >> $GITHUB_ENV
+
+      - name: Sync AUR
+        if: env.DO_SYNC == 'true'
+        run: |
+          # TODO subtree
+ 
+          rsync -av --exclude '.git' repo/grok-build-git/. aur/
+
+          git config --global user.name "$GIT_NAME"
+          git config --global user.email "$GIT_EMAIL"
+
+          to_commit=$(git -C aur diff)
+          if [[ -n "$to_commit" ]]; then
+            echo "Changes detected. Committing and pushing to AUR."
+            git -C aur add .
+            git -C aur commit -m "Sync from GitHub repository"
+            git -C aur push --dry-run
+            echo "TODO: remove !!! DRY RUN !!!"
+          else
+            echo "No changes detected. Nothing to commit."
+          fi
+
