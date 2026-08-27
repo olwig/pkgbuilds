@@ -4,6 +4,11 @@ on:
   #schedule:
   #  - cron: '0 8 * * *' 
   workflow_dispatch:
+    inputs:
+      push_dry_run:
+        description: 'Perform a dry run of the push to AUR (true/false)'
+        required: false
+        default: 'true'
     
 jobs:
   aur-sync:
@@ -14,7 +19,7 @@ jobs:
       GIT_NAME: ${{ secrets.GIT_NAME }}
       GIT_EMAIL: ${{ secrets.GIT_EMAIL }}
       PKGS: grok-build-git grok-build-bin
-      PUSH_DRY_RUN: true
+      PUSH_DRY_RUN: ${{ github.event.inputs.push_dry_run || 'true' }}
 
       # internal 
       _PKGS_TO_UPDATE: ""
