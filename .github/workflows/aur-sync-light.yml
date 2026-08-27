@@ -78,6 +78,7 @@ jobs:
 
             git clone $url $dest
           done
+          wf_print "==============================="
 
       - name: Checkout github repo
         uses: actions/checkout@v3
@@ -122,6 +123,7 @@ jobs:
 
             _PKGS_TO_UPDATE="$_PKGS_TO_UPDATE $pkg"
           done
+          wf_print "==============================="
 
           echo "_PKGS_TO_UPDATE=$_PKGS_TO_UPDATE" >> $GITHUB_ENV
 
@@ -172,4 +174,5 @@ jobs:
               wf_print "No changes detected. Nothing to commit."
             fi
           done
+          wf_print "==============================="
 
