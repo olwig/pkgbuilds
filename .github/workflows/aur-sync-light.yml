@@ -78,6 +78,7 @@ jobs:
                 ver2=$(norm "$ver2")
               fi
 
+              # TODO suppress stdout to hide warning, if comparison never fails
               dpkg --compare-versions "$ver1" gt "$ver2" && return 0 || return 1
             }
           EOF
