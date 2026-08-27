@@ -68,10 +68,12 @@ jobs:
           pkgs=${PKGS:-}
 
           for pkg in $pkgs; do
+            wf_print "==============================="
+            wf_print "Cloning $url into $dest"
+
             url="ssh://aur@aur.archlinux.org/$pkg.git"
             dest="aur/$pkg"
 
-            wf_print "Cloning $url into $dest"
             mkdir -p "aur/$pkg"
 
             git clone $url $dest
@@ -90,6 +92,7 @@ jobs:
           . lib.sh
 
           for pkg in $pkgs; do
+            wf_print "==============================="
             wf_print "Checking package: $pkg"
 
             aur_pkbuild_file="aur/$pkg/PKGBUILD"
@@ -138,11 +141,10 @@ jobs:
           pkgs=${_PKGS_TO_UPDATE:-}
         
           for pkg in $pkgs; do
+            wf_print "==============================="
             wf_print "Syncing package: $pkg"
  
             rsync -av --exclude '.git' "repo/$pkg/." "aur/$pkg/"
-
-            
 
             diff_out=$(git -C "aur/$pkg" diff)
             if [[ -n "$diff_out" ]]; then
