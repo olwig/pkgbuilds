@@ -1,0 +1,133 @@
+name: aur-sync-light
+
+on:
+  #schedule:
+  #  - cron: '0 8 * * *' 
+  workflow_dispatch:
+    
+jobs:
+  aur-sync:
+    runs-on: ubuntu-latest
+
+    env:
+      AUR_ED25519_GITHUB: ${{ secrets.AUR_ED25519_GITHUB }}
+      GIT_NAME: ${{ secrets.GIT_NAME }}
+      GIT_EMAIL: ${{ secrets.GIT_EMAIL }}
+      PKGS: grok-build-git grok-build-bin
+      PKGS_TO_UPDATE: ""
+
+    steps:
+      - name: Prepare runner
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rsync
+
+      - name: Setup AUR SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$AUR_ED25519_GITHUB" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          cat > ~/.ssh/config << EOF
+            Host aur.archlinux.org
+              IdentityFile ~/.ssh/id_ed25519
+              IdentitiesOnly yes
+              User aur
+          EOF
+
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
+
+      - name: Clone AUR repositories
+        run: |
+          pkgs=${PKGS:-}
+
+          for pkg in $pkgs; do
+            url="ssh://aur@aur.archlinux.org/$pkg.git"
+            dest="aur/$pkg"
+
+            echo "Cloning $url into $dest"
+            mkdir -p "aur/$pkg"
+
+            git clone $url $dest
+          done
+
+      - name: Checkout github repo
+        uses: actions/checkout@v3
+        with:
+          path: repo/
+
+      - name: Check data
+        run: |
+          pkgs_to_update=""
+          pkgs=${PKGS:-}
+
+          for pkg in $pkgs; do
+            echo "Checking package: $pkg"
+            if [[ ! -f "aur/$pkg/PKGBUILD" ]]; then
+              echo "Error: PKGBUILD not found in the checked-out AUR repository for package $pkg. Exiting."
+              exit 1
+            fi
+
+            if [[ ! -f "repo/$pkg/PKGBUILD" ]]; then
+              echo "Error: PKGBUILD not found in the checked-out GitHub repository for package $pkg. Exiting."
+              exit 1
+            fi
+
+            get_version() {
+              local pkg=$1
+              local source=$2
+              local pkgver=$(grep -E '^pkgver=' "$source/$pkg/PKGBUILD" | cut -d '=' -f 2)
+              local pkgrel=$(grep -E '^pkgrel=' "$source/$pkg/PKGBUILD" | cut -d '=' -f 2)
+              echo "$pkgver-$pkgrel"
+            }
+
+            repo_version=$(get_version $pkg repo)
+            aur_version=$(get_version $pkg aur)
+
+            echo "Repository version: $repo_version"
+            echo "AUR version: $aur_version"
+
+            # basic check for now
+            if [[ "$repo_version" == "$aur_version" ]]; then
+              echo "Versions are the same. No sync needed."
+              continue
+            fi
+
+            pkgs_to_update="$pkgs_to_update $pkg"
+          done
+
+          echo "PKGS_TO_UPDATE=$pkgs_to_update" >> $GITHUB_ENV
+
+          if [[ -n "$pkgs_to_update" ]]; then
+            echo "Updates are needed for the following packages: $pkgs_to_update"
+          else
+            echo "No updates are needed for any packages."
+          fi
+
+      - name: Sync AUR
+        if: env.PKGS_TO_UPDATE != ''
+        run: |
+          # TODO subtree
+
+          pkgs=${PKGS_TO_UPDATE:-}
+        
+          for pkg in $pkgs; do
+            echo "Syncing package: $pkg"
+ 
+            rsync -av --exclude '.git' "repo/$pkg/." "aur/$pkg/"
+
+            git config --global user.name "$GIT_NAME"
+            git config --global user.email "$GIT_EMAIL"
+
+            diff_out=$(git -C "aur/$pkg" diff)
+            if [[ -n "$diff_out" ]]; then
+              echo "Changes detected. Committing and pushing to AUR."
+              git -C "aur/$pkg" add .
+              git -C "aur/$pkg" commit -m "Sync from GitHub repository"
+              git -C "aur/$pkg" push --dry-run
+              echo "TODO: remove !!! DRY RUN !!!"
+            else
+              echo "No changes detected. Nothing to commit."
+            fi
+          done
+
