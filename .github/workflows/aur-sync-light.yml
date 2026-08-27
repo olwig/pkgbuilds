@@ -14,9 +14,33 @@ jobs:
       GIT_NAME: ${{ secrets.GIT_NAME }}
       GIT_EMAIL: ${{ secrets.GIT_EMAIL }}
       PKGS: grok-build-git grok-build-bin
-      PKGS_TO_UPDATE: ""
+      PUSH_DRY_RUN: true
+
+      # internal 
+      _PKGS_TO_UPDATE: ""
 
     steps:
+      - name: Store bash lib
+        run: |
+          cat > lib.sh <<-'EOF'
+            get_version() {
+              local pkgbuild_file=$1
+              local pkgver=$(grep -E '^pkgver=' "$pkgbuild_file" | cut -d '=' -f 2)
+              local pkgrel=$(grep -E '^pkgrel=' "$pkgbuild_file" | cut -d '=' -f 2)
+              echo "$pkgver-$pkgrel"
+            }
+
+            wf_print() {
+              local msg=$1
+              echo "ℹ️  $msg"
+            }
+
+            wf_error() {
+              local msg=$1
+              echo "❌  $msg"
+            }
+          EOF
+
       - name: Prepare runner
         run: |
           sudo apt-get update
@@ -39,13 +63,15 @@ jobs:
 
       - name: Clone AUR repositories
         run: |
+          . lib.sh
+
           pkgs=${PKGS:-}
 
           for pkg in $pkgs; do
             url="ssh://aur@aur.archlinux.org/$pkg.git"
             dest="aur/$pkg"
 
-            echo "Cloning $url into $dest"
+            wf_print "Cloning $url into $dest"
             mkdir -p "aur/$pkg"
 
             git clone $url $dest
@@ -58,76 +84,90 @@ jobs:
 
       - name: Check data
         run: |
-          pkgs_to_update=""
+          _PKGS_TO_UPDATE=""
           pkgs=${PKGS:-}
 
+          . lib.sh
+
           for pkg in $pkgs; do
-            echo "Checking package: $pkg"
-            if [[ ! -f "aur/$pkg/PKGBUILD" ]]; then
-              echo "Error: PKGBUILD not found in the checked-out AUR repository for package $pkg. Exiting."
+            wf_print "Checking package: $pkg"
+
+            aur_pkbuild_file="aur/$pkg/PKGBUILD"
+            repo_pkbuild_file="repo/$pkg/PKGBUILD"
+
+            if [[ ! -f "$aur_pkbuild_file" ]]; then
+              wf_print "Error: PKGBUILD not found in the checked-out AUR repository for package $pkg. Exiting."
               exit 1
             fi
 
-            if [[ ! -f "repo/$pkg/PKGBUILD" ]]; then
-              echo "Error: PKGBUILD not found in the checked-out GitHub repository for package $pkg. Exiting."
+            if [[ ! -f "$repo_pkbuild_file" ]]; then
+              wf_print "Error: PKGBUILD not found in the checked-out GitHub repository for package $pkg. Exiting."
               exit 1
             fi
 
-            get_version() {
-              local pkg=$1
-              local source=$2
-              local pkgver=$(grep -E '^pkgver=' "$source/$pkg/PKGBUILD" | cut -d '=' -f 2)
-              local pkgrel=$(grep -E '^pkgrel=' "$source/$pkg/PKGBUILD" | cut -d '=' -f 2)
-              echo "$pkgver-$pkgrel"
-            }
+            repo_version=$(get_version $repo_pkbuild_file)
+            aur_version=$(get_version $aur_pkbuild_file)
 
-            repo_version=$(get_version $pkg repo)
-            aur_version=$(get_version $pkg aur)
-
-            echo "Repository version: $repo_version"
-            echo "AUR version: $aur_version"
+            wf_print "Repository version: $repo_version"
+            wf_print "AUR version: $aur_version"
 
             # basic check for now
             if [[ "$repo_version" == "$aur_version" ]]; then
-              echo "Versions are the same. No sync needed."
+              wf_print "Versions are the same. No sync needed."
               continue
             fi
 
-            pkgs_to_update="$pkgs_to_update $pkg"
+            _PKGS_TO_UPDATE="$_PKGS_TO_UPDATE $pkg"
           done
 
-          echo "PKGS_TO_UPDATE=$pkgs_to_update" >> $GITHUB_ENV
+          echo "_PKGS_TO_UPDATE=$_PKGS_TO_UPDATE" >> $GITHUB_ENV
 
-          if [[ -n "$pkgs_to_update" ]]; then
-            echo "Updates are needed for the following packages: $pkgs_to_update"
+          if [[ -n "$_PKGS_TO_UPDATE" ]]; then
+            wf_print "Updates are needed for the following packages: $_PKGS_TO_UPDATE"
           else
-            echo "No updates are needed for any packages."
+            wf_print "No updates are needed for any packages."
           fi
 
       - name: Sync AUR
-        if: env.PKGS_TO_UPDATE != ''
+        if: env._PKGS_TO_UPDATE != ''
         run: |
           # TODO subtree
 
-          pkgs=${PKGS_TO_UPDATE:-}
+          . lib.sh
+
+          pkgs=${_PKGS_TO_UPDATE:-}
         
           for pkg in $pkgs; do
-            echo "Syncing package: $pkg"
+            wf_print "Syncing package: $pkg"
  
             rsync -av --exclude '.git' "repo/$pkg/." "aur/$pkg/"
 
-            git config --global user.name "$GIT_NAME"
-            git config --global user.email "$GIT_EMAIL"
+            
 
             diff_out=$(git -C "aur/$pkg" diff)
             if [[ -n "$diff_out" ]]; then
-              echo "Changes detected. Committing and pushing to AUR."
+              
+              version=$(get_version "repo/$pkg/PKGBUILD")
+              gh_repo="$GITHUB_REPOSITORY"
+              msg="update to $version by automated sync from github ($gh_repo)"
+
+              wf_print "Changes detected. Committing and pushing to AUR for package $pkg with version $version."
+              wf_print "Commit message: $msg"
+
+              git config --global user.name "$GIT_NAME"
+              git config --global user.email "$GIT_EMAIL"
+
               git -C "aur/$pkg" add .
-              git -C "aur/$pkg" commit -m "Sync from GitHub repository"
-              git -C "aur/$pkg" push --dry-run
-              echo "TODO: remove !!! DRY RUN !!!"
+              git -C "aur/$pkg" commit -m "$msg"
+
+              push_args=""
+              if [[ "$PUSH_DRY_RUN" == "true" ]]; then
+                wf_print "Performing a dry run of the push."
+                push_args="--dry-run"
+              fi
+              git -C "aur/$pkg" push $push_args
             else
-              echo "No changes detected. Nothing to commit."
+              wf_print "No changes detected. Nothing to commit."
             fi
           done
 
