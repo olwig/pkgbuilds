@@ -25,13 +25,29 @@ jobs:
       _PKGS_TO_UPDATE: ""
 
     steps:
-      - name: Store bash lib
+      - name: Store helper lib
         run: |
           cat > lib.sh <<-'EOF'
-            get_version() {
+            wf_get_pkgbuild_value() {
               local pkgbuild_file=$1
-              local pkgver=$(grep -E '^pkgver=' "$pkgbuild_file" | cut -d '=' -f 2)
-              local pkgrel=$(grep -E '^pkgrel=' "$pkgbuild_file" | cut -d '=' -f 2)
+              local field=$2
+              local value
+              value=$(awk -v field="$field" '
+                $0 ~ "^[[:space:]]*"field"=" {
+                  sub(/^[[:space:]]*'"$field"'=[[:space:]]*/, "")
+                  sub(/[[:space:]]*#.*$/, "")
+                  gsub(/^["'\'']+|["'\'']+$/, "")
+                  print
+                  exit
+                }
+              ' "$pkgbuild_file")
+              echo "$value"
+            }
+
+            wf_get_pkgbuild_version() {
+              local pkgbuild_file=$1
+              local pkgver=$(wf_get_pkgbuild_value "$pkgbuild_file" "pkgver")
+              local pkgrel=$(wf_get_pkgbuild_value "$pkgbuild_file" "pkgrel")
               echo "$pkgver-$pkgrel"
             }
 
@@ -43,6 +59,27 @@ jobs:
             wf_error() {
               local msg=$1
               echo "❌  $msg"
+            }
+
+            wf_version_gt() {
+              local ver1=$1
+              local ver2=$2
+              local pkg=$3
+
+              # normalize version if -git pkg. commit hash will be removed for comparison
+              if [[ "$pkg" == *-git ]]; then
+                norm() {   
+                  # remove ecommit hash, not compatible with dpkg
+                  # starting with, witthing upstream tag seems to work despite warning
+                  # # TODO keep an eye on this version comparison
+                  echo "$1" | sed -E 's/\.[0-9a-f]{7,}//'; 
+                }
+                ver1=$(norm "$ver1")
+                ver2=$(norm "$ver2")
+              fi
+
+              # TODO suppress stdout to hide warning, if comparison never fails
+              dpkg --compare-versions "$ver1" gt "$ver2" && return 0 || return 1
             }
           EOF
 
@@ -114,19 +151,19 @@ jobs:
               exit 1
             fi
 
-            repo_version=$(get_version $repo_pkbuild_file)
-            aur_version=$(get_version $aur_pkbuild_file)
+            repo_version=$(wf_get_pkgbuild_version $repo_pkbuild_file)
+            aur_version=$(wf_get_pkgbuild_version $aur_pkbuild_file)
 
             wf_print "Repository version: $repo_version"
             wf_print "AUR version: $aur_version"
 
-            # basic check for now
-            if [[ "$repo_version" == "$aur_version" ]]; then
-              wf_print "Versions are the same. No sync needed."
-              continue
+            if wf_version_gt "$repo_version" "$aur_version" "$pkg"; then
+              wf_print "Repository version is newer than AUR version. Update needed."
+              _PKGS_TO_UPDATE="$_PKGS_TO_UPDATE $pkg"
+            else
+              wf_print "No update needed for package $pkg."
             fi
 
-            _PKGS_TO_UPDATE="$_PKGS_TO_UPDATE $pkg"
           done
           wf_print "==============================="
 
@@ -156,7 +193,7 @@ jobs:
             diff_out=$(git -C "aur/$pkg" diff)
             if [[ -n "$diff_out" ]]; then
               
-              version=$(get_version "repo/$pkg/PKGBUILD")
+              version=$(wf_get_pkgbuild_version "repo/$pkg/PKGBUILD")
               gh_repo="$GITHUB_REPOSITORY"
               msg="update to $version by automated sync from github ($gh_repo)"
 
