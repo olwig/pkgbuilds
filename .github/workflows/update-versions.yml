@@ -36,6 +36,7 @@ jobs:
             exit 1
           fi
 
+          # TODO replace sourcing
           . "$pkgbuild_file"
           if [[ ! "$pkgver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "ERROR: PKGBUILD pkgver is not in x.y.z format: $pkgver"
@@ -64,7 +65,7 @@ jobs:
           fi
       
           lowest=$(printf '%s\n' "$pkgbuild_version" "$upstream_version" | sort -V | head -n1)
-      
+          # TODO compare with dpkg
           if [[ "$lowest" == "$pkgbuild_version" ]]; then
             echo "PKGBUILD is older than upstream → update needed"
             echo "has_update=true" >> "$GITHUB_OUTPUT"
@@ -99,16 +100,126 @@ jobs:
       issues: write
 
     steps:
+
+      - name: Find earliest commit for stable version
+        run: |
+          echo "============================================================="
+          echo "Fetching stable version from $url_stable..."
+          url_stable="https://x.ai/cli/stable"
+          stable_version=$(curl -sSf "$url_stable")
+          echo "Stable upstream version: $stable_version"
+
+          echo "============================================================="
+          echo "Fetching changelog from $search_url..."
+          stable_date=""
+          search_url="https://raw.githubusercontent.com/xai-org/grok-build/refs/heads/main/crates/codegen/xai-grok-shell/CHANGELOG.md"
+          changelog_md=$(curl -sSf "$search_url")
+          filtered=$(grep '^# [0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]* — [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}$' <<< "$changelog_md" | awk '{print $2, $4}')
+          while read -r version date; do
+            if [[ "$version" == "$stable_version" ]]; then
+              stable_date="$date"
+            fi
+          done <<< "$filtered"
+
+          if [[ -z "$stable_date" ]]; then
+            echo "Stable version $stable_version not found in changelog."
+            exit 1
+          fi
+          echo "Stable version $stable_version was released on $stable_date"
+
+
+
+
+          echo "============================================================="
+          echo "Searching for earliest commit containing stable version $stable_version in $pager_cargo_toml..."
+
+          git_repo="https://github.com/xai-org/grok-build.git"
+          cargo_toml_path="crates/codegen/xai-grok-pager-bin/Cargo.toml"
+          earliest_commit=""
+
+          tmp_repo_dir=$(mktemp -d)
+          git clone --quiet --filter=blob:none --no-checkout "$git_repo" "$tmp_repo_dir"
+
+          while read -r commit; do
+            if git -C "$tmp_repo_dir" show "$commit:$cargo_toml_path" 2>/dev/null | grep -Fq "$stable_version"; then
+              earliest_commit="$commit"
+              echo "Found stable version $stable_version in commit $commit"
+            else
+              echo "Stable version $stable_version not found in commit $commit"
+            fi
+          done < <(git -C "$tmp_repo_dir" rev-list --first-parent origin/HEAD -- "$cargo_toml_path")
+
+          if [[ -z "$earliest_commit" ]]; then
+              echo "Stable version $stable_version not found in any commit of $cargo_toml_path"
+              exit 1
+          fi
+          echo "Commit for stable version $stable_version: $earliest_commit"
+
+
+          echo "============================================================="
+          echo "Stable version $stable_version corresponds to commit $earliest_commit"
+
+          echo "upstream_version=$stable_version" >> "$GITHUB_ENV"
+          echo "upstream_commit=$earliest_commit" >> "$GITHUB_ENV"
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Compare upstream to PKGBUILD version
-        id: version
+      - name: Fetch PKGBUILD data
         run: |
-          set -euo pipefail
+          pkgbuild_file="grok-build/PKGBUILD"
+          if [[ ! -f "$pkgbuild_file" ]]; then
+            echo "ERROR: $pkgbuild_file not found"
+            exit 1
+          fi
 
-          search_url="https://raw.githubusercontent.com/xai-org/grok-build/main/crates/codegen/xai-grok-pager-bin/Cargo.toml"
-          VERSION=$(curl -fsS "$search_url" | grep -oP 'version = "\K[^"]+')
-          echo "Upstream (github) stable version: $VERSION"
+          # TODO replace sourcing
+          . "$pkgbuild_file"
+          if [[ ! "$pkgver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: PKGBUILD pkgver is not in x.y.z format: $pkgver"
+            exit 1
+          fi
 
-          exit 0
+          echo "PKGBUILD version: $pkgver"
+          echo "pkgbuild_version=$pkgver" >> "$GITHUB_ENV"
+
+      - name: Compare upstream to pkgbuild versions
+        run: |
+      
+          if [[ "$pkgbuild_version" == "$upstream_version" ]]; then
+            echo "Versions are identical. Nothing to do."
+            echo "has_update=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
+      
+          # TODO use dpkg --compare-versions instead of sort -V
+          lowest=$(printf '%s\n' "$pkgbuild_version" "$upstream_version" | sort -V | head -n1)
+      
+          if [[ "$lowest" == "$pkgbuild_version" ]]; then
+            echo "PKGBUILD is older than upstream → update needed"
+            echo "has_update=true" >> "$GITHUB_ENV"
+          else
+            echo "PKGBUILD is NEWER than upstream. Please check manually."
+            exit 1
+          fi
+
+      - name: Print versions
+        run: |
+          echo "Upstream : $upstream_version"
+          echo "Upstream commit : $upstream_commit"
+          echo "PKGBUILD : $pkgbuild_version"
+          echo "has_update = $has_update"
+
+      - name: Notify about new version
+        if: ${{ env.has_update == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const version = "${{ env.upstream_version }}";
+            const commit = "${{ env.upstream_commit }}";
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `New grok-build version: ${version}`,
+              body: `@olwig\n\nNew version found: **${version} (${commit})**\n\nPlease update the PKGBUILD for \`grok-build\`.`
+            });
