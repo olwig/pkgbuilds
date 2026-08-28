@@ -1,0 +1,215 @@
+name: makepkg
+
+on:
+  workflow_dispatch:
+    inputs: &common_inputs
+      pkgs:
+        description: "list of packages to build, seperator is default bash IFS" 
+        required: false
+        default: ''
+        type: string
+
+
+      skip_arch:
+        description: "list of architectures to skip, seperator is default bash IFS" 
+        required: false
+        default: ''
+        type: string
+
+  workflow_call:
+    inputs: *common_inputs
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+
+    outputs:
+      matrix_json: ${{ steps.matrix.outputs.matrix_json }}
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          path: repo/
+
+      - name: Dump files
+        run: |
+          ls -A repo/
+
+      - name: Make build matrix
+        id: matrix
+        run: |
+          set -euo pipefail
+
+          container_images="nevuly/archlinux:base-devel"
+
+          declare -A arch_map
+          arch_map["x86_64"]="ubuntu-24.04 $container_images"
+          arch_map["aarch64"]="ubuntu-24.04-arm $container_images"
+
+          pkgs="${{ inputs.pkgs }}"
+          skip_arch="${{ inputs.skip_arch }}"
+          matrix="{\"include\":["
+          matrix_end="]}"
+
+          for pkg in $pkgs; do
+
+            pkgbuild_file="repo/$pkg/PKGBUILD"
+          
+            echo "--------------------------------"
+            echo "Processing package '$pkg' -> $pkgbuild_file"
+
+            if [ ! -f "$pkgbuild_file" ]; then
+              echo "Package '$pkg' does not exist or does not contain a PKGBUILD file."
+              exit 1
+            fi
+
+            # TODO parse pkgbuild our self for security reasons
+            . "$pkgbuild_file"
+
+            echo "Parsed PKGBUILD for package '$pkg':"
+            echo "  pkgname: $pkgname"
+            echo "  pkgver: $pkgver"
+            echo "  pkgrel: $pkgrel"
+            echo "  arch: ${arch[*]}"
+
+            for a in "${arch[@]}"; do
+            
+              if [[ -z "${arch_map[$a]+x}" ]]; then
+                echo "Unsupported architecture '$a' for package '$pkg'."
+                exit 1
+              fi
+
+              if grep -qw "$a" <<< "$skip_arch"; then
+                echo "Skipping architecture '$a' for package '$pkg' as it is in the skip_arch list."
+                continue
+              fi
+
+              IFS=' ' read -r runner image <<< "${arch_map[$a]}"
+              echo "  Architecture '$a' is supported. Runner: '$runner', Image: '$image'"
+
+              matrix+="{\"pkg\":\"$pkg\","
+              matrix+="\"arch\":\"$a\","
+              matrix+="\"runner\":\"$runner\","
+              matrix+="\"image\":\"$image\","
+              matrix+="\"pkgver\":\"$pkgver\","
+              matrix+="\"pkgrel\":\"$pkgrel\"},"
+            done
+          done
+          echo "--------------------------------"
+
+          matrix="${matrix%,}"
+          matrix="${matrix}${matrix_end}"
+          
+          echo "Matrix JSON: $matrix"
+
+          echo "matrix_json=$matrix" >> $GITHUB_OUTPUT
+      
+      - name: Dump beautified matrix JSON
+        run: |
+          echo '${{ steps.matrix.outputs.matrix_json }}' | jq '.'
+
+  makepkg:
+    name: makepkg (${{ matrix.pkg }} / ${{ matrix.arch }})
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ${{ matrix.image }}
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix_json) }}
+    
+    steps:
+      - name: Dump matrix values
+        run: |
+          echo "Matrix values:"
+          echo "  pkg: ${{ matrix.pkg }}"
+          echo "  arch: ${{ matrix.arch }}"
+          echo "  runner: ${{ matrix.runner }}"
+          echo "  image: ${{ matrix.image }}"
+          echo "  pkgver: ${{ matrix.pkgver }}"
+          echo "  pkgrel: ${{ matrix.pkgrel }}"
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          path: repo/
+
+      - name: prepare container for makepkg
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed sudo nodejs npm
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+          sudo chown -R builder:builder repo/
+
+      - name: makepkg -si (build + install test)
+        working-directory: repo/${{ matrix.pkg }}
+        run: |
+          sudo -u builder makepkg -si --noconfirm
+          echo "makepkg finished successfully"
+
+          if [[ $? -eq 0 ]]; then
+            echo "Build succeeded for package '${{ matrix.pkg }}' on architecture '${{ matrix.arch }}'."
+          else
+            rm -f "repo/${{ matrix.pkg }}/*.zst"
+            echo "Build failed for package '${{ matrix.pkg }}' on architecture '${{ matrix.arch }}'."
+            exit 1
+          fi
+
+      - name: Upload zst as build result
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.pkg }}-${{ matrix.arch }}-build-result
+          path: repo/${{ matrix.pkg }}/*.zst
+          if-no-files-found: error
+          retention-days: 5
+
+  check:
+    name: Check build results
+    needs: [makepkg, prepare]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          merge-multiple: true
+          pattern: '*-build-result'
+
+      - name: tree
+        run: |
+          if ! command -v tree &> /dev/null; then
+            echo "tree command not found, installing..."
+            sudo apt-get update && sudo apt-get install -y tree
+          fi
+
+          tree artifacts/
+
+          matrix_json_raw=$(echo '${{ needs.prepare.outputs.matrix_json }}' | jq -r '.include[] | {pkg: .pkg, arch: .arch, pkgver: .pkgver, pkgrel: .pkgrel}')
+
+          for row in $(echo "$matrix_json_raw" | jq -c '.'); do
+            pkg=$(echo "$row" | jq -r '.pkg')
+            arch=$(echo "$row" | jq -r '.arch')
+            pkgver=$(echo "$row" | jq -r '.pkgver')
+            pkgrel=$(echo "$row" | jq -r '.pkgrel')
+
+            echo "Checking build result for package '$pkg' on architecture '$arch'..."
+
+            # Check if the artifact exists
+            artifact_path="artifacts/${pkg}-${pkgver}-${pkgrel}-${arch}.pkg.tar.zst"
+            if [ -f "$artifact_path" ]; then
+              echo "Build artifact exists: $artifact_path"
+            else
+              echo "Build artifact does NOT exist: $artifact_path"
+              exit 1
+            fi
+          done
+
+          
+
+      

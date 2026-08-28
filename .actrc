@@ -1,2 +1,3 @@
 --secret-file $HOME/.config/act/secrets
 --pull=false
+--artifact-server-path $PWD/.artifacts
