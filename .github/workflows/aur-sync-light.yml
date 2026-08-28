@@ -25,6 +25,22 @@ jobs:
       _PKGS_TO_UPDATE: ""
 
     steps:
+      - name: Check environment variables
+        run: |
+          if [[ -z "$AUR_ED25519_GITHUB" ]]; then
+            echo "ERROR: AUR_ED25519_GITHUB is not set. Please set it in the repository secrets."
+            exit 1
+          fi
+
+          if [[ -z "$GIT_NAME" || -z "$GIT_EMAIL" ]]; then
+            echo "ERROR: GIT_NAME or GIT_EMAIL is not set. Please set them in the repository secrets."
+            exit 1
+          fi
+
+          if [[ -z "$PKGS" ]]; then
+            echo "ERROR: PKGS is not set. Please set it in the workflow environment variables."
+            ecxit 1
+          fi
       - name: Store helper lib
         run: |
           cat > lib.sh <<-'EOF'
