@@ -1,0 +1,26 @@
+name: makepkg
+
+on:
+  workflow_dispatch:
+    inputs: &common_inputs
+      pkgs:
+        description: "list of packages to build, seperator is default bash IFS" 
+        required: false
+        default: ''
+        type: string
+
+
+      skip_arch:
+        description: "list of architectures to skip, seperator is default bash IFS" 
+        required: false
+        default: ''
+        type: string
+
+  workflow_call:
+    inputs: *common_inputs
+
+jobs:
+  declared:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "declared"
