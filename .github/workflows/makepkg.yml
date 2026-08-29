@@ -1,7 +1,10 @@
 name: makepkg
 
+# TODO beautify echo's
+
 on:
   workflow_dispatch:
+
     inputs: &common_inputs
       pkgs:
         description: "list of packages to build, seperator is default bash IFS" 
@@ -9,6 +12,19 @@ on:
         default: ''
         type: string
 
+      max_parallel:
+      # TODO fails for act, wf expression is not evaluated. 
+      # issure -> https://github.com/nektos/act/issues/261
+        description: "max parallel build jobs" 
+        required: false
+        default: 4
+        type: number
+
+      retention_days:
+        description: "number of days to keep build artifacts"
+        required: false
+        default: 7
+        type: number   
 
       skip_arch:
         description: "list of architectures to skip, seperator is default bash IFS" 
@@ -20,7 +36,291 @@ on:
     inputs: *common_inputs
 
 jobs:
-  declared:
+  prepare:
     runs-on: ubuntu-latest
+
+    outputs:
+      matrix_json: ${{ steps.matrix.outputs.matrix_json }}
+
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+
     steps:
-      - run: echo "declared"
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          path: repo/
+
+      - name: Dump files
+        run: |
+          ls -A repo/
+
+      - name: Make build matrix
+        id: matrix
+        run: |
+          container_images="nevuly/archlinux:base-devel"
+
+          declare -A arch_map
+          arch_map["x86_64"]="ubuntu-latest $container_images"
+          arch_map["aarch64"]="ubuntu-24.04-arm $container_images"
+
+          pkgs='${{ inputs.pkgs }}'
+          skip_arch='${{ inputs.skip_arch }}'
+          matrix="{\"include\":["
+          matrix_end="]}"
+
+          # determine all packages to process if pkgs is empty
+          if [[ -z "$pkgs" ]]; then
+            for pkg in $(find repo/ -mindepth 1 -maxdepth 1 -type d -not -name '.*' -exec basename {} \;); do
+              if [[ -f "repo/$pkg/PKGBUILD" ]]; then
+                pkgs+="$pkg "
+              fi
+            done
+          fi
+
+          echo "Packages to process: $pkgs"
+          for pkg in $pkgs; do
+
+            pkgbuild_file="repo/$pkg/PKGBUILD"
+          
+            echo "--------------------------------"
+            echo "Processing package '$pkg' -> $pkgbuild_file"
+
+            if [ ! -f "$pkgbuild_file" ]; then
+              echo "Package '$pkg' does not exist or does not contain a PKGBUILD file."
+              exit 1
+            fi
+
+            # TODO parse pkgbuild our self for security reasons
+            . "$pkgbuild_file"
+
+            echo "Parsed PKGBUILD for package '$pkg':"
+            echo "  pkgname: $pkgname"
+            echo "  pkgver: $pkgver"
+            echo "  pkgrel: $pkgrel"
+            echo "  arch: ${arch[*]}"
+
+            for a in "${arch[@]}"; do
+            
+              if [[ -z "${arch_map[$a]+x}" ]]; then
+                echo "Unsupported architecture '$a' for package '$pkg'."
+                exit 1
+              fi
+
+              if grep -qw "$a" <<< "$skip_arch"; then
+                echo "Skipping architecture '$a' for package '$pkg' as it is in the skip_arch list."
+                continue
+              fi
+
+              IFS=' ' read -r runner image <<< "${arch_map[$a]}"
+              echo "  Architecture '$a' is supported. Runner: '$runner', Image: '$image'"
+
+              commit=$(git -C repo/ rev-parse --short HEAD)
+
+              matrix+="{\"pkg\":\"$pkg\","
+              matrix+="\"arch\":\"$a\","
+              matrix+="\"runner\":\"$runner\","
+              matrix+="\"image\":\"$image\","
+              matrix+="\"pkgver\":\"$pkgver\","
+              matrix+="\"pkgrel\":\"$pkgrel\","
+              matrix+="\"commit\":\"$commit\"},"              
+            done
+          done
+          echo "--------------------------------"
+
+          matrix="${matrix%,}"
+          matrix="${matrix}${matrix_end}"
+          
+          echo "Matrix JSON: $matrix"
+
+          echo "matrix_json=$matrix" >> $GITHUB_OUTPUT
+      
+      - name: Dump beautified matrix JSON
+        run: |
+          echo '${{ steps.matrix.outputs.matrix_json }}' | jq '.'
+
+  makepkg:
+    name: makepkg-(${{ matrix.pkg }}-${{ matrix.arch }})
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ${{ matrix.image }}
+    strategy:
+      # TODO fails for act, wf expression is not evaluated. 
+      # issure -> https://github.com/nektos/act/issues/261
+      max-parallel: ${{ inputs.max_parallel }}
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix_json) }}
+    
+    steps:
+      - name: Dump matrix values
+        run: |
+          echo "Matrix values:"
+          echo "  pkg: ${{ matrix.pkg }}"
+          echo "  arch: ${{ matrix.arch }}"
+          echo "  runner: ${{ matrix.runner }}"
+          echo "  image: ${{ matrix.image }}"
+          echo "  pkgver: ${{ matrix.pkgver }}"
+          echo "  pkgrel: ${{ matrix.pkgrel }}"
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          path: repo/
+
+      - name: prepare container for makepkg
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed sudo nodejs npm tree
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+          sudo chown -R builder:builder repo/
+
+      - name: makepkg -si (build + install test)
+        id: makepkg
+        working-directory: repo/${{ matrix.pkg }}
+        run: |
+
+          # collect data to store in .result as bash vars
+          pkg=${{ matrix.pkg }}
+          pkgver=${{ matrix.pkgver }}
+          pkgrel=${{ matrix.pkgrel }}
+          arch=${{ matrix.arch }}
+          commit=${{ matrix.commit }}
+          artifact_path=""
+          success=false
+
+
+
+          # build and install
+          sudo -u builder makepkg -si --noconfirm
+          if [[ $? -eq 0 ]]; then
+            success=true
+          fi
+          # TODO check if install works, like version check of binary. passt over test cmd to the workflow some how
+
+          # update pkgver and pkgrel for -git packages to actual values from .PKGINFO, due rebuild
+          if [[ "$success" == true && "$pkg" == *"-git" ]]; then
+            pkginfo_file="pkg/$pkg/.PKGINFO"
+            if [[ -f "$pkginfo_file" ]]; then
+              read -r pkgver pkgrel <<<  "$(grep -m2 '^pkgver = ' "$pkginfo_file" | \
+                awk '{print $3}' | tr '-' ' ')"
+              echo "-git package detected, updating pkgver and pkgrel to actual values from .PKGINFO"
+            else
+              echo ".PKGINFO file not found for -git package '$pkg'. Build must have failed"
+              exit 1
+            fi
+          fi
+
+          # find artifact path
+          artifacts=(*.pkg.tar.*)
+          if [[ ${#artifacts[@]} -gt 0 && -f "${artifacts[0]}" ]]; then
+            cp "${artifacts[0]}" "$GITHUB_WORKSPACE/"
+            artifact_path="${artifacts[0]}"
+          else
+            echo "No artifact found for package '$pkg' on architecture '$arch'. Build must have failed."
+            success=false
+          fi
+          echo "Artifact path: $artifact_path"
+
+
+          echo "==============================="
+          tree -a
+          echo "==============================="
+
+          if [[ "$success" == true ]]; then
+            echo "Build succeeded for package '${{ matrix.pkg }}' on architecture '${{ matrix.arch }}'."
+          else
+            echo "Build failed for package '${{ matrix.pkg }}' on architecture '${{ matrix.arch }}'."
+          fi
+
+          # store data in .result file as bash vars
+          cd "$GITHUB_WORKSPACE"
+          result_file="${pkg}-${arch}.result"
+          echo "result_pkg=$pkg" > "$result_file"
+          echo "result_pkgver=$pkgver" >> "$result_file"
+          echo "result_pkgrel=$pkgrel" >> "$result_file"
+          echo "result_arch=$arch" >> "$result_file"
+          echo "result_commit=$commit" >> "$result_file"
+          echo "result_artifact_path=$artifact_path" >> "$result_file"
+          echo "result_success=$success" >> "$result_file"
+
+          echo "artifact_path=$artifact_path" >> $GITHUB_OUTPUT
+          echo "result_file=$result_file" >> $GITHUB_OUTPUT
+
+      - name: Upload zst as build result
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.pkg }}-${{ matrix.arch }}-build-result
+          path: |
+            ${{ steps.makepkg.outputs.result_file }}
+            ${{ steps.makepkg.outputs.artifact_path }}
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}
+
+  check:
+    name: Check build results
+    needs: [makepkg, prepare]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          merge-multiple: true
+          pattern: '*-build-result'
+
+      - name: check results
+        run: |
+          if ! command -v tree &> /dev/null; then
+            echo "tree command not found, installing..."
+            sudo apt-get update && sudo apt-get install -y tree
+          fi
+
+          echo ""
+          tree artifacts/
+          
+          all_success=true
+          for row in $(echo '${{ needs.prepare.outputs.matrix_json }}' | jq -c '.include[]'); do
+            echo ""
+            cat artifacts/*.result
+
+            pkg=$(echo "$row" | jq -r '.pkg')
+            arch=$(echo "$row" | jq -r '.arch')
+
+            result_file="artifacts/${pkg}-${arch}.result"
+            . "$result_file"
+            if [[ $pkg != "$result_pkg" || $arch != "$result_arch" ]]; then
+              echo "Mismatch in result file: expected pkg=$pkg, arch=$arch but got pkg=$result_pkg, arch=$result_arch"
+              exit 1
+            fi
+            
+            # update in case of -git packages, which have updated pkgver and pkgrel after build
+            pkgver=$result_pkgver
+            pkgrel=$result_pkgrel
+
+            if [[ "$result_success" == "true" && -f "artifacts/$result_artifact_path" ]]; then
+              echo "Build succeeded for package '$pkg' on architecture '$arch'."
+              echo "  pkgver: $pkgver"
+              echo "  pkgrel: $pkgrel"
+              echo "  commit: $result_commit"
+              echo "  artifact: $result_artifact_path"
+            else
+              all_success=false
+              echo "Build failed for package '$pkg' on architecture '$arch'."
+            fi
+          done
+
+          echo "--------------------------------"
+          if [[ "$all_success" == true ]]; then
+            echo "All builds succeeded."
+          else
+            echo "Some builds failed."
+            exit 1
+          fi
+
+      
