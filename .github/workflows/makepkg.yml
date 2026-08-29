@@ -218,12 +218,14 @@ jobs:
 
             echo "Checking build result for package '$pkg' on architecture '$arch'..."
 
-            # Check if the artifact exists
-            artifact_path="artifacts/${pkg}-${pkgver}-${pkgrel}-${arch}.pkg.tar.zst"
-            if [ -f "$artifact_path" ]; then
-              echo "Build artifact exists: $artifact_path"
+            # TODO beautify
+            artifact_base="artifacts/${pkg}-${pkgver}-${pkgrel}-${arch}.pkg.tar"
+            if [ -f "${artifact_base}.zst" ]; then
+              echo "Build artifact exists: ${artifact_base}.zst"
+            elif [ -f "${artifact_base}.xz" ]; then
+              echo "Build artifact exists: ${artifact_base}.xz"
             else
-              echo "Build artifact does NOT exist: $artifact_path"
+              echo "Build artifact does NOT exist: ${artifact_base}.zst or ${artifact_base}.xz"
               exit 1
             fi
           done
