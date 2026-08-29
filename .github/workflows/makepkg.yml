@@ -152,6 +152,18 @@ jobs:
           sudo -u builder makepkg -si --noconfirm
           echo "makepkg finished successfully"
 
+          # TODO in case of *-git pkgs the actual version might change during build
+          # update matrix.pkgver and matrix.pkgrel to the actual values from the built package
+          pkginfo_file="pkg/${{ matrix.pkg }}/.PKGINFO"
+          if [[ -f "$pkginfo_file" ]]; then
+            read -r pkgver pkgrel <<<  "$(grep -m2 '^pkgver = ' "$pkginfo_file" | \
+              awk '{print $3}' | tr '-' ' ')"
+            echo "-git package detected, updating pkgver and pkgrel to actual values from .PKGINFO"
+            echo "pkgver=$pkgver" >> $GITHUB_ENV
+            echo "pkgrel=$pkgrel" >> $GITHUB_ENV
+            # TODO distrubute the info to check job
+          fi
+
           if [[ $? -eq 0 ]]; then
             echo "Build succeeded for package '${{ matrix.pkg }}' on architecture '${{ matrix.arch }}'."
           else
