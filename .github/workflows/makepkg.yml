@@ -12,13 +12,13 @@ on:
         default: ''
         type: string
 
-      max_parallel:
+      #max_parallel:
       # TODO fails for act, wf expression is not evaluated. 
       # issure -> https://github.com/nektos/act/issues/261
-        description: "max parallel build jobs" 
-        required: false
-        default: 4
-        type: number
+       # description: "max parallel build jobs" 
+       # required: false
+       # default: 4
+       # type: number
 
       retention_days:
         description: "number of days to keep build artifacts"
@@ -150,7 +150,7 @@ jobs:
     strategy:
       # TODO fails for act, wf expression is not evaluated. 
       # issure -> https://github.com/nektos/act/issues/261
-      max-parallel: ${{ inputs.max_parallel }}
+      #max-parallel: ${{ inputs.max_parallel }}
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix_json) }}
     
