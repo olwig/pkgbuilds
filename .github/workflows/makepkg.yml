@@ -151,6 +151,7 @@ jobs:
       # TODO fails for act, wf expression is not evaluated. 
       # issure -> https://github.com/nektos/act/issues/261
       #max-parallel: ${{ inputs.max_parallel }}
+      max-parallel: 10
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix_json) }}
     
