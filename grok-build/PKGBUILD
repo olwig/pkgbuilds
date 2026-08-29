@@ -3,7 +3,7 @@
 pkgname=grok-build
 _pkgname=$pkgname
 pkgver=1.0.5
-pkgrel=1
+pkgrel=2
 pkgdesc="SpaceXAI's coding agent harness and TUI. Fullscreen, mouse interactive, extensible."
 arch=('x86_64' 'aarch64')
 url="https://x.ai/build"
@@ -41,7 +41,7 @@ source=(
 
 b2sums=(
   "SKIP"
-  "4d37a050b4fa861b2ee076940908f4dfef7419e6297425bb3dfe6c26fcb9440b01befff1837451b9bed194ee45a3f52e30b040bd356b32a5bb178ede6aea694e"
+  "37b586af90c67f7a8cfb778d3408d60c87f81cd5aff6c52ed8e091c741446543f5aaecf773160f4cf29005bded1c653f2e62868b851e9470914dded3e585c58e"
 )
 
 # TODO default "ultra" sandbox -> https://docs.x.ai/build/features/sandbox
@@ -59,6 +59,12 @@ prepare() {
 
   # TODO check if version is in source
   # TODO check also LICENSE file
+  # TODO move toolchain install to build() like -bin pkg
+
+
+}
+build() {
+  cd "$srcdir/$_pkgname"
   
   export RUSTUP_HOME="$srcdir/rustup"
   export CARGO_HOME="$srcdir/cargo"
@@ -67,21 +73,14 @@ prepare() {
 
   rm -rf "$RUSTUP_HOME" "$CARGO_HOME"
 
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none
-  
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none  
   rustup show
-  cargo install dotslash
-}
 
-build() {
-  cd "$srcdir/$_pkgname"
-  
-  export RUSTUP_HOME="$srcdir/rustup"
-  export CARGO_HOME="$srcdir/cargo"
-  export PATH="$CARGO_HOME/bin:$PATH"
-  
   # ring, used by xai-grok-tools, fails to link when -flto is present in CFLAGS
+  # same for lzma and zstd, since moved install dotslash from prepare to build
   unset CFLAGS 
+
+  cargo install dotslash
   cargo build -p xai-grok-pager-bin --release 
 
   binary="$srcdir/$_pkgname/target/release/xai-grok-pager"
