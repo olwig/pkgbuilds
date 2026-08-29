@@ -140,7 +140,7 @@ jobs:
       - name: prepare container for makepkg
         run: |
           pacman -Syu --noconfirm
-          pacman -S --noconfirm --needed sudo nodejs npm
+          pacman -S --noconfirm --needed sudo nodejs npm tree
           useradd -m builder
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
@@ -154,15 +154,19 @@ jobs:
 
           # TODO in case of *-git pkgs the actual version might change during build
           # update matrix.pkgver and matrix.pkgrel to the actual values from the built package
-          pkginfo_file="pkg/${{ matrix.pkg }}/.PKGINFO"
-          if [[ -f "$pkginfo_file" ]]; then
-            read -r pkgver pkgrel <<<  "$(grep -m2 '^pkgver = ' "$pkginfo_file" | \
-              awk '{print $3}' | tr '-' ' ')"
-            echo "-git package detected, updating pkgver and pkgrel to actual values from .PKGINFO"
-            echo "pkgver=$pkgver" >> $GITHUB_ENV
-            echo "pkgrel=$pkgrel" >> $GITHUB_ENV
-            # TODO distrubute the info to check job
+          if [[ "${{ matrix.pkg }}" == *"-git" ]]; then
+            pkginfo_file="pkg/${{ matrix.pkg }}/.PKGINFO"
+            if [[ -f "$pkginfo_file" ]]; then
+              read -r pkgver pkgrel <<<  "$(grep -m2 '^pkgver = ' "$pkginfo_file" | \
+                awk '{print $3}' | tr '-' ' ')"
+              echo "-git package detected, updating pkgver and pkgrel to actual values from .PKGINFO"
+              echo "pkgver=$pkgver" >> $GITHUB_ENV
+              echo "pkgrel=$pkgrel" >> $GITHUB_ENV
+              # TODO distrubute the info to check job
+            fi
           fi
+
+          tree -a
 
           if [[ $? -eq 0 ]]; then
             echo "Build succeeded for package '${{ matrix.pkg }}' on architecture '${{ matrix.arch }}'."
@@ -193,7 +197,7 @@ jobs:
           merge-multiple: true
           pattern: '*-build-result'
 
-      - name: tree
+      - name: check results
         run: |
           if ! command -v tree &> /dev/null; then
             echo "tree command not found, installing..."
