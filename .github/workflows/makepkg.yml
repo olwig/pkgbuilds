@@ -180,9 +180,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.pkg }}-${{ matrix.arch }}-build-result
-          path: |
-            repo/${{ matrix.pkg }}/*.zst
-            repo/${{ matrix.pkg }}/*.xz
+          path: repo/${{ matrix.pkg }}/*.pkg.tar.*
           if-no-files-found: error
           retention-days: 5
 
