@@ -101,62 +101,56 @@ jobs:
 
     steps:
 
-      - name: Find earliest commit for stable version
+      - name: Find commit for stable version via SOURCE_REV
         run: |
           echo "============================================================="
-          echo "Fetching stable version from $url_stable..."
           url_stable="https://x.ai/cli/stable"
-          stable_version=$(curl -sSf "$url_stable")
+          echo "Fetching stable version from $url_stable..."
+          stable_version=$(curl -sSf "$url_stable" | tr -d '[:space:]')
           echo "Stable upstream version: $stable_version"
 
           echo "============================================================="
-          echo "Fetching changelog from $search_url..."
-          stable_date=""
-          search_url="https://raw.githubusercontent.com/xai-org/grok-build/refs/heads/main/crates/codegen/xai-grok-shell/CHANGELOG.md"
-          changelog_md=$(curl -sSf "$search_url")
-          filtered=$(grep '^# [0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]* — [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}$' <<< "$changelog_md" | awk '{print $2, $4}')
-          while read -r version date; do
-            if [[ "$version" == "$stable_version" ]]; then
-              stable_date="$date"
-            fi
-          done <<< "$filtered"
+          echo "Extracting SOURCE_REV from stable binary..."
+          binary_url="https://x.ai/cli/grok-${stable_version}-linux-x86_64"
+          stable_binary=$(mktemp)
+          curl -sSfL "$binary_url" -o "$stable_binary"
+          chmod +x "$stable_binary"
 
-          if [[ -z "$stable_date" ]]; then
-            echo "Stable version $stable_version not found in changelog."
+          source_rev=$(
+            "$stable_binary" --version 2>/dev/null \
+              | grep -Eio 'SOURCE_REV[^0-9a-fA-F]*[0-9a-f]{7,40}' \
+              | grep -Eio '[0-9a-f]{7,40}' \
+              | head -n1
+          )
+
+          if [[ -z "$source_rev" ]]; then
+            source_rev=$(
+              strings "$stable_binary" \
+                | grep -Eio 'SOURCE_REV[^0-9a-fA-F]*[0-9a-f]{7,40}' \
+                | grep -Eio '[0-9a-f]{7,40}' \
+                | head -n1
+            )
+          fi
+
+          if [[ -z "$source_rev" ]]; then
+            echo "Failed to extract SOURCE_REV from stable binary $binary_url"
             exit 1
           fi
-          echo "Stable version $stable_version was released on $stable_date"
-
-
-
-
-          echo "============================================================="
-          echo "Searching for earliest commit containing stable version $stable_version in $pager_cargo_toml..."
+          source_rev="${source_rev,,}"
+          echo "SOURCE_REV from stable binary: $source_rev"
 
           git_repo="https://github.com/xai-org/grok-build.git"
-          cargo_toml_path="crates/codegen/xai-grok-pager-bin/Cargo.toml"
-          earliest_commit=""
-
           tmp_repo_dir=$(mktemp -d)
           git clone --quiet --filter=blob:none --no-checkout "$git_repo" "$tmp_repo_dir"
-
-          while read -r commit; do
-            if git -C "$tmp_repo_dir" show "$commit:$cargo_toml_path" 2>/dev/null | grep -Fq "$stable_version"; then
-              earliest_commit="$commit"
-              echo "Found stable version $stable_version in commit $commit"
-            else
-              echo "Stable version $stable_version not found in commit $commit"
-            fi
-          done < <(git -C "$tmp_repo_dir" rev-list --first-parent origin/HEAD -- "$cargo_toml_path")
+          earliest_commit=$(git -C "$tmp_repo_dir" rev-parse --verify "${source_rev}^{commit}" 2>/dev/null || true)
+          if [[ -z "$earliest_commit" ]]; then
+            earliest_commit=$(git -C "$tmp_repo_dir" rev-list --all | grep -m1 "^$source_rev" || true)
+          fi
 
           if [[ -z "$earliest_commit" ]]; then
-              echo "Stable version $stable_version not found in any commit of $cargo_toml_path"
-              exit 1
+            echo "SOURCE_REV $source_rev does not match a commit in $git_repo"
+            exit 1
           fi
-          echo "Commit for stable version $stable_version: $earliest_commit"
-
-
-          echo "============================================================="
           echo "Stable version $stable_version corresponds to commit $earliest_commit"
 
           echo "upstream_version=$stable_version" >> "$GITHUB_ENV"
