@@ -1,7 +1,7 @@
 pkgbase = grok-build
 	pkgdesc = SpaceXAI's coding agent harness and TUI. Fullscreen, mouse interactive, extensible.
-	pkgver = 1.0.5
-	pkgrel = 2
+	pkgver = 1.0.13
+	pkgrel = 1
 	url = https://x.ai/build
 	arch = x86_64
 	arch = aarch64
@@ -14,7 +14,7 @@ pkgbase = grok-build
 	options = !debug
 	options = !emptydirs
 	backup = etc/grok/requirements.toml
-	source = grok-build::git+https://github.com/xai-org/grok-build.git#commit=9fabadea800fa6e2ed8ec91c4f45f02b7e2504f4
+	source = grok-build::git+https://github.com/xai-org/grok-build.git#commit=bb7f39d5858cbf5e00de639367f59debbdcb0138
 	source = requirements.toml
 	b2sums = SKIP
 	b2sums = 37b586af90c67f7a8cfb778d3408d60c87f81cd5aff6c52ed8e091c741446543f5aaecf773160f4cf29005bded1c653f2e62868b851e9470914dded3e585c58e

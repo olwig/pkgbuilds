@@ -2,8 +2,8 @@
 
 pkgname=grok-build
 _pkgname=$pkgname
-pkgver=1.0.5
-pkgrel=2
+pkgver=1.0.13
+pkgrel=1
 pkgdesc="SpaceXAI's coding agent harness and TUI. Fullscreen, mouse interactive, extensible."
 arch=('x86_64' 'aarch64')
 url="https://x.ai/build"
@@ -12,7 +12,7 @@ provides=('grok')
 conflicts=('grok')
 options=('!strip' '!debug' '!emptydirs')
 
-makedepends=("git" "curl") # "perl" "clang")
+makedepends=("git" "curl")
 backup=('etc/grok/requirements.toml')
 
 # Upstream does not publish stable GitHub tags/releases.
@@ -32,7 +32,7 @@ backup=('etc/grok/requirements.toml')
 # edition.workspace = true
 # license = "Apache-2.0"
 
-_commit="9fabadea800fa6e2ed8ec91c4f45f02b7e2504f4"
+_commit="bb7f39d5858cbf5e00de639367f59debbdcb0138" # 1.0.13
 
 source=(
   "$_pkgname::git+https://github.com/xai-org/grok-build.git#commit=$_commit"
@@ -45,7 +45,6 @@ b2sums=(
 )
 
 # TODO default "ultra" sandbox -> https://docs.x.ai/build/features/sandbox
-# TODO restrict with explicit local grok user
 
 prepare() {
   cd "$srcdir/$_pkgname"
@@ -59,9 +58,6 @@ prepare() {
 
   # TODO check if version is in source
   # TODO check also LICENSE file
-  # TODO move toolchain install to build() like -bin pkg
-
-
 }
 build() {
   cd "$srcdir/$_pkgname"
