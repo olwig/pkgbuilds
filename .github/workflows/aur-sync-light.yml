@@ -18,11 +18,9 @@ jobs:
       AUR_ED25519_GITHUB: ${{ secrets.AUR_ED25519_GITHUB }}
       GIT_NAME: ${{ secrets.GIT_NAME }}
       GIT_EMAIL: ${{ secrets.GIT_EMAIL }}
+      # TODO replace with info from repo.yml
       PKGS: grok-build-git grok-build-bin
       PUSH_DRY_RUN: ${{ github.event.inputs.push_dry_run || 'true' }}
-
-      # internal 
-      _PKGS_TO_UPDATE: ""
 
     steps:
       - name: Check environment variables
@@ -102,7 +100,7 @@ jobs:
       - name: Prepare runner
         run: |
           sudo apt-get update
-          sudo apt-get install -y rsync
+          sudo apt-get install -y rsync tree
 
       - name: Setup AUR SSH
         run: |
@@ -123,114 +121,84 @@ jobs:
         run: |
           . lib.sh
 
+          wf_print " => Packages to clone: $pkgs"
+
           pkgs=${PKGS:-}
-
           for pkg in $pkgs; do
-            wf_print "==============================="
-            wf_print "Cloning $url into $dest"
-
+            pkg_dir="aur/$pkg"
             url="ssh://aur@aur.archlinux.org/$pkg.git"
-            dest="aur/$pkg"
 
-            mkdir -p "aur/$pkg"
+            mkdir -p "$pkg_dir"
 
-            git clone $url $dest
+            wf_print " ===> Cloning $url into $pkg_dir"
+            git clone $url "$pkg_dir" || {
+              wf_error " ===> Failed to clone $url into $pkg_dir"
+              exit 1
+            }
           done
-          wf_print "==============================="
 
       - name: Checkout github repo
         uses: actions/checkout@v3
         with:
           path: repo/
 
-      - name: Check data
+      - name: Dump tree
         run: |
-          _PKGS_TO_UPDATE=""
-          pkgs=${PKGS:-}
-
-          . lib.sh
-
-          for pkg in $pkgs; do
-            wf_print "==============================="
-            wf_print "Checking package: $pkg"
-
-            aur_pkbuild_file="aur/$pkg/PKGBUILD"
-            repo_pkbuild_file="repo/$pkg/PKGBUILD"
-
-            if [[ ! -f "$aur_pkbuild_file" ]]; then
-              wf_print "Error: PKGBUILD not found in the checked-out AUR repository for package $pkg. Exiting."
-              exit 1
-            fi
-
-            if [[ ! -f "$repo_pkbuild_file" ]]; then
-              wf_print "Error: PKGBUILD not found in the checked-out GitHub repository for package $pkg. Exiting."
-              exit 1
-            fi
-
-            repo_version=$(wf_get_pkgbuild_version $repo_pkbuild_file)
-            aur_version=$(wf_get_pkgbuild_version $aur_pkbuild_file)
-
-            wf_print "Repository version: $repo_version"
-            wf_print "AUR version: $aur_version"
-
-            if wf_version_gt "$repo_version" "$aur_version" "$pkg"; then
-              wf_print "Repository version is newer than AUR version. Update needed."
-              _PKGS_TO_UPDATE="$_PKGS_TO_UPDATE $pkg"
-            else
-              wf_print "No update needed for package $pkg."
-            fi
-
-          done
-          wf_print "==============================="
-
-          echo "_PKGS_TO_UPDATE=$_PKGS_TO_UPDATE" >> $GITHUB_ENV
-
-          if [[ -n "$_PKGS_TO_UPDATE" ]]; then
-            wf_print "Updates are needed for the following packages: $_PKGS_TO_UPDATE"
-          else
-            wf_print "No updates are needed for any packages."
-          fi
+          echo "Dumping directory tree for debugging:"
+          tree -a -L 3 -I '.git'      
 
       - name: Sync AUR
-        if: env._PKGS_TO_UPDATE != ''
         run: |
-          # TODO subtree
-
           . lib.sh
 
-          pkgs=${_PKGS_TO_UPDATE:-}
-        
+          pkgs=${PKGS:-}
+
+          wf_print "Packages to update: $pkgs"
           for pkg in $pkgs; do
-            wf_print "==============================="
-            wf_print "Syncing package: $pkg"
+            wf_print " => Working on package: $pkg"
+
+            monorepo_dir="repo"
+            aurrepo_dir="aur/$pkg"
+            
+            src_dir="$monorepo_dir/$pkg"
+            dest_dir="$aurrepo_dir"
  
-            rsync -av --exclude '.git' "repo/$pkg/." "aur/$pkg/"
+            wf_print " ===> Force copying files from $src_dir to $dest_dir"
+            # TODO: remove forced copy after sync logic is verified. -avIW => -avc
+            rsync -avIW --delete --progress --exclude '.git' "$src_dir/." "$dest_dir/"
 
-            diff_out=$(git -C "aur/$pkg" diff)
-            if [[ -n "$diff_out" ]]; then
-              
-              version=$(wf_get_pkgbuild_version "repo/$pkg/PKGBUILD")
-              gh_repo="$GITHUB_REPOSITORY"
-              msg="update to $version by automated sync from github ($gh_repo)"
-
-              wf_print "Changes detected. Committing and pushing to AUR for package $pkg with version $version."
-              wf_print "Commit message: $msg"
-
-              git config --global user.name "$GIT_NAME"
-              git config --global user.email "$GIT_EMAIL"
-
-              git -C "aur/$pkg" add .
-              git -C "aur/$pkg" commit -m "$msg"
-
-              push_args=""
-              if [[ "$PUSH_DRY_RUN" == "true" ]]; then
-                wf_print "Performing a dry run of the push."
-                push_args="--dry-run"
-              fi
-              git -C "aur/$pkg" push $push_args
-            else
-              wf_print "No changes detected. Nothing to commit."
+            # double check that all files were copied correctly
+            changes=$(diff -rq --exclude=.git "$src_dir/." "$dest_dir/")
+            if [[ -n "$changes" ]]; then
+              wf_error " ===> Not all files copied correctly."
             fi
+            wf_print " ===> All files copied correctly."
+
+            wf_print " ===> Git adding changes in $dest_dir"
+            git -C "$aurrepo_dir" add -A
+            git -C "$aurrepo_dir" status
+
+            # go further only index differs from HEAD
+            if git -C "$aurrepo_dir" diff --cached --quiet; then
+              wf_print " ===> No changes to commit for package $pkg."
+              continue
+            fi
+            
+            git config --global user.name "$GIT_NAME"
+            git config --global user.email "$GIT_EMAIL"
+            hash=$(git -C "$monorepo_dir" rev-parse HEAD)
+
+            printf -v msg 'chore(sync): update %s from GitHub repo %s\n\nsource commit: %s' \
+              "$pkg" "$GITHUB_REPOSITORY" "$hash"
+            wf_print " ===> Committing changes with message:\n$msg"
+
+            git -C "$aurrepo_dir" commit -m "$msg"
+
+            push_cmd=(git -C "$aurrepo_dir" push)
+            if [[ "$PUSH_DRY_RUN" == "true" ]]; then
+              wf_print "Performing a dry run of the push."
+              push_cmd+=(--dry-run)
+            fi
+            "${push_cmd[@]}"
           done
-          wf_print "==============================="
 
