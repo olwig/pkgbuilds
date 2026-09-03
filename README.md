@@ -7,7 +7,7 @@ Personal Arch Linux PKGBUILDs — modified, improved and new packages I use.
 Add this to your `paru.conf` (usually `~/.config/paru/paru.conf` or `/etc/paru.conf`):
 
 ```ini
-[olw-pkgbuilds]
+[olwig/pkgbuilds]
 Url = https://github.com/olwig/pkgbuilds
 Depth = 3
 ```
