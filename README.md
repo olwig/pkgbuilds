@@ -4,12 +4,22 @@ Personal Arch Linux PKGBUILDs — modified, improved and new packages I use.
 
 ## Usage with paru
 
-Add this to your `paru.conf` (usually `~/.config/paru/paru.conf` or `/etc/paru.conf`):
+Add one of these to your `paru.conf` (usually `~/.config/paru/paru.conf` or `/etc/paru.conf`):
+
+All packages:
 
 ```ini
 [olwig/pkgbuilds]
 Url = https://github.com/olwig/pkgbuilds
 Depth = 3
+```
+
+Just `grok-build`:
+
+```ini
+[olwig/pkgbuilds-grok-build]
+Url = https://github.com/olwig/pkgbuilds
+Path = packages/grok-build
 ```
 
 Then run:
