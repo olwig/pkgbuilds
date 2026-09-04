@@ -56,6 +56,7 @@ jobs:
       - name: Dump files
         run: |
           ls -A repo/
+          ls -A repo/packages/
 
       - name: Make build matrix
         id: matrix
@@ -73,8 +74,8 @@ jobs:
 
           # determine all packages to process if pkgs is empty
           if [[ -z "$pkgs" ]]; then
-            for pkg in $(find repo/ -mindepth 1 -maxdepth 1 -type d -not -name '.*' -exec basename {} \;); do
-              if [[ -f "repo/$pkg/PKGBUILD" ]]; then
+            for pkg in $(find repo/packages/ -mindepth 1 -maxdepth 1 -type d -not -name '.*' -exec basename {} \;); do
+              if [[ -f "repo/packages/$pkg/PKGBUILD" ]]; then
                 pkgs+="$pkg "
               fi
             done
@@ -83,7 +84,7 @@ jobs:
           echo "Packages to process: $pkgs"
           for pkg in $pkgs; do
 
-            pkgbuild_file="repo/$pkg/PKGBUILD"
+            pkgbuild_file="repo/packages/$pkg/PKGBUILD"
           
             echo "--------------------------------"
             echo "Processing package '$pkg' -> $pkgbuild_file"
@@ -182,7 +183,7 @@ jobs:
 
       - name: makepkg -si (build + install test)
         id: makepkg
-        working-directory: repo/${{ matrix.pkg }}
+        working-directory: repo/packages/${{ matrix.pkg }}
         run: |
 
           # collect data to store in .result as bash vars

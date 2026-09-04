@@ -30,7 +30,7 @@ jobs:
       - name: pkgbuild version
         id: pkgbuild
         run: |
-          pkgbuild_file="grok-build-bin/PKGBUILD"
+          pkgbuild_file="packages/grok-build-bin/PKGBUILD"
           if [[ ! -f "$pkgbuild_file" ]]; then
             echo "ERROR: $pkgbuild_file not found"
             exit 1
@@ -167,7 +167,7 @@ jobs:
 
       - name: Fetch PKGBUILD data
         run: |
-          pkgbuild_file="grok-build/PKGBUILD"
+          pkgbuild_file="packages/grok-build/PKGBUILD"
           if [[ ! -f "$pkgbuild_file" ]]; then
             echo "ERROR: $pkgbuild_file not found"
             exit 1

@@ -145,7 +145,7 @@ jobs:
       - name: Dump tree
         run: |
           echo "Dumping directory tree for debugging:"
-          tree -a -L 3 -I '.git'      
+          tree -a -L 4 -I '.git'      
 
       - name: Sync AUR
         run: |
@@ -160,7 +160,7 @@ jobs:
             monorepo_dir="repo"
             aurrepo_dir="aur/$pkg"
             
-            src_dir="$monorepo_dir/$pkg"
+            src_dir="$monorepo_dir/packages/$pkg"
             dest_dir="$aurrepo_dir"
  
             wf_print " ===> Force copying files from $src_dir to $dest_dir"
