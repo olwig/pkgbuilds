@@ -4,16 +4,20 @@ Global instructions for coding agents working in this repository.
 
 ## Mission
 
-- Maintain Arch Linux PKGBUILDs in `packages/`.
+- Maintain this monorepo of selected Arch Linux PKGBUILDs in `packages/`.
 - Keep changes minimal, auditable, and package-focused.
 - Prefer correctness and reproducibility over broad refactors.
+- Track upstream versions, update PKGBUILDs/checksums when needed, and verify builds before sync.
+- Sync updated packages to external services (AUR and others) when required.
+- `aur-sync-light.yml` is the light sync path and currently syncs a hardcoded package list.
+- A non-light sync flow is planned around `repo.yml`, with a bash mapping library to resolve package sync settings.
 
 ## Repository Layout
 
 - `packages/<name>/PKGBUILD` — package definitions.
-- `packages/<name>/requirements.toml` — default Grok requirements config used by packages.
-- `.github/workflows/makepkg.yml` — CI build matrix and package build/install checks.
-- `.github/workflows/update-versions.yml` — upstream version monitoring for Grok packages.
+- `.github/workflows/makepkg.yml` — CI workflow that builds/tests package directories in a matrix, including install checks.
+- `.github/workflows/update-versions.yml` — workflow that checks upstream Grok releases and updates PKGBUILDs/checksums when newer versions are available.
+- `.github/workflows/aur-sync-light.yml` — workflow for syncing a hardcoded package set from this monorepo to AUR.
 
 ## Working Rules
 
