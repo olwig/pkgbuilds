@@ -1,57 +1,43 @@
 # AGENTS.md
 
-Global instructions for coding agents working in this repository.
+Single source of truth for coding agents in this repository.
+`CLAUDE.md` and `GEMINI.md` stay one-line shims (`@AGENTS.md`).
+Do not copy these rules into other files.
 
-## Mission
+## Repo
 
-- Maintain this monorepo of selected Arch Linux PKGBUILDs in `packages/`.
-- Keep changes minimal, auditable, and package-focused.
-- Prefer correctness and reproducibility over broad refactors.
-- Track upstream versions, update PKGBUILDs/checksums when needed, and verify builds before sync.
-- Sync updated packages to external services (AUR and others) when required.
-- `aur-sync-light.yml` is the light sync path and currently syncs a hardcoded package list.
-- A non-light sync flow is planned around `repo.yml`, with a bash mapping library to resolve package sync settings.
+Personal monorepo of Arch Linux PKGBUILDs.
 
-## Repository Layout
+- `packages/<name>/` — one package each. Only packaging files: PKGBUILD,
+  `.SRCINFO`, license, extra sources. These dirs are what `makepkg` and AUR
+  sync copy. Do not put agent docs there.
+- `.agents/skills/` — how-to for AUR, PKGBUILD, pacman, and package-specific
+  lookups. Use a skill when its description matches the task.
+- `.github/workflows/` — CI. Do not edit unless asked.
 
-- `packages/<name>/PKGBUILD` — package definitions.
-- `.github/workflows/makepkg.yml` — CI workflow that builds/tests package directories in a matrix, including install checks.
-- `.github/workflows/update-versions.yml` — workflow that checks upstream Grok releases and updates PKGBUILDs/checksums when newer versions are available.
-- `.github/workflows/aur-sync-light.yml` — workflow for syncing a hardcoded package set from this monorepo to AUR.
+A PKGBUILD is a bash recipe `makepkg` runs to build an Arch package.
+The AUR is Arch's unofficial user repo; some packages here are synced there,
+most work stays in this GitHub repo.
 
-## Working Rules
+Root license is MIT. Each package directory is 0BSD. `license=` inside a
+PKGBUILD is the upstream software license.
 
-1. Make a short plan first and share it in the PR progress checklist.
-2. Keep edits surgical; avoid unrelated cleanup.
-3. Do not change package behavior unless requested.
-4. Preserve Arch conventions (`pkgver`, `pkgrel`, `source`, checksums, `arch`, `license`).
-5. If changing a PKGBUILD source URL or artifact, update checksums in the same change.
-6. If upstream version changes:
-   - bump `pkgver`,
-   - reset/increment `pkgrel` as appropriate,
-   - refresh checksums and any pinned commit/hash.
-7. Keep root license/workflow changes separate from package logic changes when possible.
+## Rules
 
-## PKGBUILD Change Checklist
-
-- Verify the package still builds with `makepkg` flow used by this repo.
-- Ensure `provides`/`conflicts` remain correct for `grok`-providing packages.
-- Keep installed paths stable unless the issue explicitly requires path changes.
-- For `-git` packages, preserve dynamic `pkgver()` behavior.
-- For pinned source commits, document or keep version mapping comments accurate.
+- Change only what the task needs. Do not restyle or "improve" a PKGBUILD
+  without a reason.
+- If you change a PKGBUILD, regenerate `.SRCINFO` in the same directory:
+  `makepkg --printsrcinfo > .SRCINFO`
+- Prefer skills under `.agents/skills/` over improvised AUR/PKGBUILD procedure.
 
 ## Validation
 
-- Prefer targeted validation for touched package(s).
-- Useful commands (run from repo root):
-  - `makepkg -si --noconfirm` inside the changed package directory.
-  - `shellcheck --shell=bash --exclude=SC2034,SC2154,SC2164 PKGBUILD` for PKGBUILD shell linting.
-- If only docs/instruction files change, skip build/test runs.
+From the package directory, on Arch:
 
-## Agent File Policy
+```bash
+bash -n PKGBUILD
+makepkg --printsrcinfo > .SRCINFO
+```
 
-- This file is the single source of truth for agent guidance.
-- Provider-specific files must stay thin and point here:
-  - `CLAUDE.md`
-  - `GEMINI.md`
-- If another tool later requires its own instruction filename, add a one-line shim that references `@AGENTS.md`.
+Build with `makepkg -si --noconfirm` only when the task needs a real package
+build, and only on Arch. Docs-only changes: skip the build.
