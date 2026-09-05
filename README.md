@@ -2,6 +2,8 @@
 
 Personal Arch Linux PKGBUILDs — modified, improved and new packages I use.
 
+I also use this repo to get hands-on with Copilot/AI workflows and learn agentic coding in practice.
+
 ## Usage with paru
 
 Add one of these to your `paru.conf` (usually `~/.config/paru/paru.conf` or `/etc/paru.conf`):
