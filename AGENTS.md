@@ -1,7 +1,7 @@
 # AGENTS.md
 
 Single source of truth for coding agents in this repository.
-`CLAUDE.md` and `GEMINI.md` stay one-line shims (`@AGENTS.md`).
+`CLAUDE.md` and `GEMINI.md` stay one-line shims, if present (`@AGENTS.md`).
 Do not copy these rules into other files.
 
 ## Repo
