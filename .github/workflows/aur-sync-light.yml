@@ -192,8 +192,9 @@ jobs:
             git config --global user.email "$GIT_EMAIL"
             hash=$(git -C "$monorepo_dir" rev-parse HEAD)
 
-            printf -v msg 'chore(sync): update %s from GitHub repo %s\n\nsource commit: %s' \
-              "$pkg" "$GITHUB_REPOSITORY" "$hash"
+            ver=$(wf_get_pkgbuild_version "$dest_dir/PKGBUILD")
+            printf -v msg 'upgpkg: %s %s\n\nsync from github.com/%s\nsource commit: %s' \
+              "$pkg" "$ver" "$GITHUB_REPOSITORY" "$hash"
             wf_print " ===> Committing changes with message:\n$msg"
 
             git -C "$aurrepo_dir" commit -m "$msg"
