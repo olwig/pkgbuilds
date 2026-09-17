@@ -101,71 +101,110 @@ jobs:
 
     steps:
 
-      - name: Find earliest commit for stable version
+      - name: Find pin from changelog candidates
         run: |
           echo "============================================================="
-          echo "Fetching stable version from $url_stable..."
-          url_stable="https://x.ai/cli/stable"
-          stable_version=$(curl -sSf "$url_stable")
-          echo "Stable upstream version: $stable_version"
-
-          echo "============================================================="
           echo "Fetching changelog from $search_url..."
-          stable_date=""
           search_url="https://raw.githubusercontent.com/xai-org/grok-build/refs/heads/main/crates/codegen/xai-grok-shell/CHANGELOG.md"
           changelog_md=$(curl -sSf "$search_url")
-          filtered=$(grep '^# [0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]* — [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}$' <<< "$changelog_md" | awk '{print $2, $4}')
-          while read -r version date; do
-            if [[ "$version" == "$stable_version" ]]; then
-              stable_date="$date"
-            fi
-          done <<< "$filtered"
+          mapfile -t candidates < <(grep '^# [0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]* — [0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}$' <<< "$changelog_md" | awk '{print $2}' | sort -Vr)
 
-          if [[ -z "$stable_date" ]]; then
-            echo "Stable version $stable_version not found in changelog."
+          if [[ ${#candidates[@]} -eq 0 ]]; then
+            echo "ERROR: no version candidates in changelog."
             exit 1
           fi
-          echo "Stable version $stable_version was released on $stable_date"
-
-
-
+          echo "Changelog candidates (high to low): ${candidates[*]}"
 
           echo "============================================================="
-          echo "Searching for earliest commit containing stable version $stable_version in $pager_cargo_toml..."
+          echo "Scanning cargo version bumps in $cargo_toml_path..."
 
           git_repo="https://github.com/xai-org/grok-build.git"
           cargo_toml_path="crates/codegen/xai-grok-pager-bin/Cargo.toml"
-          earliest_commit=""
 
           tmp_repo_dir=$(mktemp -d)
           git clone --quiet --filter=blob:none --no-checkout "$git_repo" "$tmp_repo_dir"
 
+          # oldest commit per cargo version (rev-list is newest-first; last write wins)
+          declare -A earliest_commit_for
+          declare -A parent_commit_for
+          declare -A parent_version_for
           while read -r commit; do
-            if git -C "$tmp_repo_dir" show "$commit:$cargo_toml_path" 2>/dev/null | grep -Fq "$stable_version"; then
-              earliest_commit="$commit"
-              echo "Found stable version $stable_version in commit $commit"
-            else
-              echo "Stable version $stable_version not found in commit $commit"
+            cargo_ver=$(git -C "$tmp_repo_dir" show "$commit:$cargo_toml_path" 2>/dev/null | grep '^version =' | head -n1 | cut -d '"' -f2 || true)
+            if [[ -z "$cargo_ver" ]]; then
+              continue
             fi
+            earliest_commit_for["$cargo_ver"]="$commit"
+            parent=$(git -C "$tmp_repo_dir" rev-parse "${commit}^" 2>/dev/null || true)
+            parent_commit_for["$cargo_ver"]="$parent"
+            parent_ver=""
+            if [[ -n "$parent" ]]; then
+              parent_ver=$(git -C "$tmp_repo_dir" show "$parent:$cargo_toml_path" 2>/dev/null | grep '^version =' | head -n1 | cut -d '"' -f2 || true)
+            fi
+            parent_version_for["$cargo_ver"]="$parent_ver"
           done < <(git -C "$tmp_repo_dir" rev-list --first-parent origin/HEAD -- "$cargo_toml_path")
 
-          if [[ -z "$earliest_commit" ]]; then
-              echo "Stable version $stable_version not found in any commit of $cargo_toml_path"
-              exit 1
-          fi
-          echo "Commit for stable version $stable_version: $earliest_commit"
+          mapped_version=""
+          mapped_commit=""
+          for candidate in "${candidates[@]}"; do
+            echo "============================================================="
+            echo "Trying changelog candidate $candidate..."
+            pin="${earliest_commit_for[$candidate]:-}"
+            if [[ -z "$pin" ]]; then
+              echo "Candidate $candidate not mirrored in $cargo_toml_path"
+              continue
+            fi
+            parent_ver="${parent_version_for[$candidate]:-}"
+            if [[ -n "$parent_ver" && "$parent_ver" == "$candidate" ]]; then
+              echo "Candidate $candidate pin $pin parent still $candidate; skip"
+              continue
+            fi
+            echo "Mapped candidate $candidate to commit $pin (parent ${parent_commit_for[$candidate]:-} ${parent_ver:-none})"
+            mapped_version="$candidate"
+            mapped_commit="$pin"
+            break
+          done
 
+          if [[ -z "$mapped_version" ]]; then
+            echo "not mirrored yet"
+            echo "mapped=false" >> "$GITHUB_ENV"
+            echo "has_update=false" >> "$GITHUB_ENV"
+            echo "upstream_version=" >> "$GITHUB_ENV"
+            echo "upstream_commit=" >> "$GITHUB_ENV"
+            exit 0
+          fi
 
           echo "============================================================="
-          echo "Stable version $stable_version corresponds to commit $earliest_commit"
+          echo "Changelog candidate $mapped_version corresponds to commit $mapped_commit"
+          echo "mapped=true" >> "$GITHUB_ENV"
+          echo "upstream_version=$mapped_version" >> "$GITHUB_ENV"
+          echo "upstream_commit=$mapped_commit" >> "$GITHUB_ENV"
 
-          echo "upstream_version=$stable_version" >> "$GITHUB_ENV"
-          echo "upstream_commit=$earliest_commit" >> "$GITHUB_ENV"
+          echo "============================================================="
+          echo "Checking mapped version against x.ai stable channel..."
+          channel_note="x.ai stable channel check failed."
+          stable_channel=$(curl -fsS https://x.ai/cli/stable | tr -d '[:space:]' || true)
+          echo "x.ai stable channel: ${stable_channel:-unavailable}"
+          echo "stable_channel=${stable_channel:-}" >> "$GITHUB_ENV"
+          if [[ "$stable_channel" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            if [[ "$mapped_version" == "$stable_channel" ]]; then
+              channel_note="this version matches the x.ai stable channel."
+            else
+              lowest=$(printf '%s\n' "$mapped_version" "$stable_channel" | sort -V | head -n1)
+              if [[ "$lowest" == "$mapped_version" ]]; then
+                channel_note="this version is behind the x.ai stable channel (${stable_channel}). expected: public source has no newer pin."
+              else
+                channel_note="this version is ahead of the x.ai stable channel (${stable_channel}). check manually."
+              fi
+            fi
+          fi
+          echo "$channel_note"
+          echo "channel_note=$channel_note" >> "$GITHUB_ENV"
 
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Fetch PKGBUILD data
+        if: ${{ env.mapped != 'false' }}
         run: |
           pkgbuild_file="packages/grok-build/PKGBUILD"
           if [[ ! -f "$pkgbuild_file" ]]; then
@@ -184,6 +223,7 @@ jobs:
           echo "pkgbuild_version=$pkgver" >> "$GITHUB_ENV"
 
       - name: Compare upstream to pkgbuild versions
+        if: ${{ env.mapped != 'false' }}
         run: |
       
           if [[ "$pkgbuild_version" == "$upstream_version" ]]; then
@@ -205,10 +245,13 @@ jobs:
 
       - name: Print versions
         run: |
+          echo "mapped : ${mapped:-}"
           echo "Upstream : $upstream_version"
           echo "Upstream commit : $upstream_commit"
-          echo "PKGBUILD : $pkgbuild_version"
-          echo "has_update = $has_update"
+          echo "x.ai stable : ${stable_channel:-}"
+          echo "channel note : ${channel_note:-}"
+          echo "PKGBUILD : ${pkgbuild_version:-}"
+          echo "has_update = ${has_update:-}"
 
       - name: Notify about new version
         if: ${{ env.has_update == 'true' }}
@@ -217,9 +260,10 @@ jobs:
           script: |
             const version = "${{ env.upstream_version }}";
             const commit = "${{ env.upstream_commit }}";
+            const channelNote = "${{ env.channel_note }}";
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `New grok-build version: ${version}`,
-              body: `@olwig\n\nNew version found: **${version} (${commit})**\n\nPlease update the PKGBUILD for \`grok-build\`.`
+              body: `@olwig\n\nNew version found: **${version} (${commit})**\n\n${channelNote}\n\nPlease update the PKGBUILD for \`grok-build\`.`
             });
