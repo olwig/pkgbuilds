@@ -90,7 +90,7 @@ jobs:
                   # remove ecommit hash, not compatible with dpkg
                   # starting with, witthing upstream tag seems to work despite warning
                   # # TODO keep an eye on this version comparison
-                  echo "$1" | sed -E 's/\\.[0-9a-f]{7,}//'; 
+                  echo "$1" | sed -E 's/\.[0-9a-f]{7,}//'; 
                 }
                 ver1=$(norm "$ver1")
                 ver2=$(norm "$ver2")
