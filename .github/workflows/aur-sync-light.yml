@@ -6,8 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       push_dry_run:
-        description: 'Perform a dry run of the push to AUR (true/false)'
+        description: 'Perform a dry run of the push to AUR'
         required: false
+        type: choice
+        options:
+          - true
+          - false
         default: 'true'
     
 jobs:
@@ -201,4 +205,3 @@ jobs:
             fi
             "${push_cmd[@]}"
           done
-
