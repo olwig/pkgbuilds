@@ -114,6 +114,8 @@ jobs:
             exit 1
           fi
           echo "Changelog candidates (high to low): ${candidates[*]}"
+          stable_channel=$(curl -fsS https://x.ai/cli/stable | tr -d '[:space:]' || true)
+          echo "x.ai stable channel (candidate cap): ${stable_channel:-unavailable}"
 
           echo "============================================================="
           echo "Scanning cargo version bumps in $cargo_toml_path..."
@@ -148,6 +150,13 @@ jobs:
           for candidate in "${candidates[@]}"; do
             echo "============================================================="
             echo "Trying changelog candidate $candidate..."
+            if [[ "$stable_channel" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              lowest=$(printf '%s\n' "$candidate" "$stable_channel" | sort -V | head -n1)
+              if [[ "$lowest" != "$candidate" ]]; then
+                echo "Candidate $candidate is above x.ai stable ($stable_channel); skip"
+                continue
+              fi
+            fi
             pin="${earliest_commit_for[$candidate]:-}"
             if [[ -z "$pin" ]]; then
               echo "Candidate $candidate not mirrored in $cargo_toml_path"
@@ -182,7 +191,6 @@ jobs:
           echo "============================================================="
           echo "Checking mapped version against x.ai stable channel..."
           channel_note="x.ai stable channel check failed."
-          stable_channel=$(curl -fsS https://x.ai/cli/stable | tr -d '[:space:]' || true)
           echo "x.ai stable channel: ${stable_channel:-unavailable}"
           echo "stable_channel=${stable_channel:-}" >> "$GITHUB_ENV"
           if [[ "$stable_channel" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
