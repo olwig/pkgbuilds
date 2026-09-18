@@ -116,6 +116,11 @@ jobs:
           echo "Changelog candidates (high to low): ${candidates[*]}"
           stable_channel=$(curl -fsS https://x.ai/cli/stable | tr -d '[:space:]' || true)
           echo "x.ai stable channel (candidate cap): ${stable_channel:-unavailable}"
+          stable_semver=""
+          if [[ "$stable_channel" =~ ^([0-9]+\.[0-9]+\.[0-9]+)($|[^0-9].*) ]]; then
+            stable_semver="${BASH_REMATCH[1]}"
+          fi
+          echo "x.ai stable semver (candidate cap): ${stable_semver:-unavailable}"
 
           echo "============================================================="
           echo "Scanning cargo version bumps in $cargo_toml_path..."
@@ -150,10 +155,10 @@ jobs:
           for candidate in "${candidates[@]}"; do
             echo "============================================================="
             echo "Trying changelog candidate $candidate..."
-            if [[ "$stable_channel" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              lowest=$(printf '%s\n' "$candidate" "$stable_channel" | sort -V | head -n1)
+            if [[ -n "$stable_semver" ]]; then
+              lowest=$(printf '%s\n' "$candidate" "$stable_semver" | sort -V | head -n1)
               if [[ "$lowest" != "$candidate" ]]; then
-                echo "Candidate $candidate is above x.ai stable ($stable_channel); skip"
+                echo "Candidate $candidate is above x.ai stable ($stable_semver); skip"
                 continue
               fi
             fi
@@ -193,11 +198,11 @@ jobs:
           channel_note="x.ai stable channel check failed."
           echo "x.ai stable channel: ${stable_channel:-unavailable}"
           echo "stable_channel=${stable_channel:-}" >> "$GITHUB_ENV"
-          if [[ "$stable_channel" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            if [[ "$mapped_version" == "$stable_channel" ]]; then
+          if [[ -n "$stable_semver" ]]; then
+            if [[ "$mapped_version" == "$stable_semver" ]]; then
               channel_note="this version matches the x.ai stable channel."
             else
-              lowest=$(printf '%s\n' "$mapped_version" "$stable_channel" | sort -V | head -n1)
+              lowest=$(printf '%s\n' "$mapped_version" "$stable_semver" | sort -V | head -n1)
               if [[ "$lowest" == "$mapped_version" ]]; then
                 channel_note="this version is behind the x.ai stable channel (${stable_channel}). expected: public source has no newer pin."
               else
