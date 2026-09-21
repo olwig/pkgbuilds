@@ -90,7 +90,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `New grok-build version: ${version}`,
-              body: `@olwig\n\nNew version found: **${version}**\n\nPlease update the PKGBUILD for \`grok-build-bin\`.`
+              body: `@olwig\n\nNew version found for pkg grok-build-bin: **${version}**\n\nPlease update the PKGBUILD for \`grok-build-bin\`.`
             });
             
   grok-build:
@@ -278,5 +278,5 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `New grok-build version: ${version}`,
-              body: `@olwig\n\nNew version found: **${version} (${commit})**\n\n${channelNote}\n\nPlease update the PKGBUILD for \`grok-build\`.`
+              body: `@olwig\n\nNew version found for pkg grok-build: **${version} (${commit})**\n\n${channelNote}\n\nPlease update the PKGBUILD for \`grok-build\`.`
             });
