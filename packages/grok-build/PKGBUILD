@@ -2,7 +2,7 @@
 
 pkgname=grok-build
 _pkgname=$pkgname
-pkgver=1.0.32
+pkgver=1.0.38
 pkgrel=1
 pkgdesc="SpaceXAI's coding agent harness and TUI. Fullscreen, mouse interactive, extensible."
 arch=('x86_64' 'aarch64')
@@ -32,7 +32,7 @@ backup=('etc/grok/requirements.toml')
 # edition.workspace = true
 # license = "Apache-2.0"
 
-_commit="482711333c7195dc16a272777f86086d615e2afb" # 1.0.32
+_commit="4247f661689354b831191f11eeeac8424993fe3d" # 1.0.38
 
 source=(
   "$_pkgname::git+https://github.com/xai-org/grok-build.git#commit=$_commit"
@@ -69,7 +69,7 @@ build() {
 
   rm -rf "$RUSTUP_HOME" "$CARGO_HOME"
 
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none  
+  curl --proto '=https' '--tlsv1.2' -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none  
   rustup show
 
   # ring, used by xai-grok-tools, fails to link when -flto is present in CFLAGS
