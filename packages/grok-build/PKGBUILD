@@ -2,7 +2,7 @@
 
 pkgname=grok-build
 _pkgname=$pkgname
-pkgver=1.0.38
+pkgver=1.0.41
 pkgrel=1
 pkgdesc="SpaceXAI's coding agent harness and TUI. Fullscreen, mouse interactive, extensible."
 arch=('x86_64' 'aarch64')
@@ -32,7 +32,7 @@ backup=('etc/grok/requirements.toml')
 # edition.workspace = true
 # license = "Apache-2.0"
 
-_commit="4247f661689354b831191f11eeeac8424993fe3d" # 1.0.38
+_commit="07e35a3dfeed2f200d319ef6c893b5ea286d9a51" # 1.0.41
 
 source=(
   "$_pkgname::git+https://github.com/xai-org/grok-build.git#commit=$_commit"
