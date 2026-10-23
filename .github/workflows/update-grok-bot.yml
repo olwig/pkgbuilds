@@ -1,0 +1,219 @@
+name: update-grok-bot
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: update-grok-bot
+  cancel-in-progress: false
+
+jobs:
+  grok-bot-bin:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+
+    steps:
+      - name: Upstream version
+        id: upstream
+        run: |
+          url="https://api2.cursor.sh/updates/api/download/stable/linux-x64/sand"
+          echo "Fetching $url"
+          json=$(curl -fsSL --retry 3 --retry-delay 2 --max-time 30 "$url")
+          echo "Response: $json"
+
+          version=$(jq -er '.version' <<<"$json")
+          commit=$(jq -er '.commitSha' <<<"$json")
+          deb_url=$(jq -er '.debUrl' <<<"$json")
+
+          if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){2,}$ ]]; then
+            echo "ERROR: upstream version is not numeric: $version"
+            exit 1
+          fi
+          if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "ERROR: upstream commit is not 40 hex chars: $commit"
+            exit 1
+          fi
+          case "$deb_url" in
+            *"/${commit}/"*"grok-bot_${version}_amd64.deb") ;;
+            *)
+              echo "ERROR: debUrl does not match version and commit: $deb_url"
+              exit 1
+              ;;
+          esac
+
+          echo "Upstream version: $version"
+          echo "Upstream commit:  $commit"
+          echo "Upstream deb:     $deb_url"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "deb_url=$deb_url" >> "$GITHUB_OUTPUT"
+
+      - name: AUR PKGBUILD
+        id: aur
+        run: |
+          dest="${RUNNER_TEMP}/grok-bot-bin"
+          echo "Cloning https://aur.archlinux.org/grok-bot-bin.git"
+          git clone --depth 1 --quiet https://aur.archlinux.org/grok-bot-bin.git "$dest"
+
+          mapfile -t pkgver_lines < <(grep -E '^pkgver=.+' "$dest/PKGBUILD")
+          mapfile -t commit_lines < <(grep -E '^_commit=.+' "$dest/PKGBUILD")
+          if [[ ${#pkgver_lines[@]} -ne 1 || ${#commit_lines[@]} -ne 1 ]]; then
+            echo "ERROR: expected one pkgver and one _commit in the AUR PKGBUILD"
+            printf 'pkgver lines: %s\n' "${pkgver_lines[@]:-}"
+            printf '_commit lines: %s\n' "${commit_lines[@]:-}"
+            exit 1
+          fi
+
+          version=${pkgver_lines[0]#pkgver=}
+          commit=${commit_lines[0]#_commit=}
+
+          if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){2,}$ ]]; then
+            echo "ERROR: AUR pkgver is not numeric: $version"
+            exit 1
+          fi
+          if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "ERROR: AUR _commit is not 40 hex chars: $commit"
+            exit 1
+          fi
+
+          echo "AUR version: $version"
+          echo "AUR commit:  $commit"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+      - name: Compare versions
+        id: compare
+        env:
+          UPSTREAM_VERSION: ${{ steps.upstream.outputs.version }}
+          UPSTREAM_COMMIT: ${{ steps.upstream.outputs.commit }}
+          AUR_VERSION: ${{ steps.aur.outputs.version }}
+          AUR_COMMIT: ${{ steps.aur.outputs.commit }}
+        run: |
+          echo "Upstream: $UPSTREAM_VERSION ($UPSTREAM_COMMIT)"
+          echo "AUR:      $AUR_VERSION ($AUR_COMMIT)"
+
+          if [[ "$UPSTREAM_COMMIT" == "$AUR_COMMIT" ]]; then
+            echo "Commits match. Nothing to do."
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Commits differ."
+
+          if dpkg --compare-versions "$UPSTREAM_VERSION" gt "$AUR_VERSION"; then
+            echo "Upstream version is higher. Update needed."
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+          elif dpkg --compare-versions "$UPSTREAM_VERSION" eq "$AUR_VERSION"; then
+            echo "Versions are equal and commits differ. No issue."
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "AUR version is higher than upstream. No issue."
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Look for an open issue
+        id: issue
+        if: steps.compare.outputs.has_update == 'true'
+        uses: actions/github-script@v7
+        env:
+          UPSTREAM_VERSION: ${{ steps.upstream.outputs.version }}
+        with:
+          script: |
+            const title = `New grok-bot version for pkg grok-bot-bin: ${process.env.UPSTREAM_VERSION}`;
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            const found = issues.find((issue) => issue.title === title);
+            if (found) {
+              core.info(`Open issue already exists: ${found.html_url}`);
+              core.setOutput('exists', 'true');
+            } else {
+              core.info(`No open issue titled: ${title}`);
+              core.setOutput('exists', 'false');
+            }
+
+      - name: Download deb and hash it
+        id: deb
+        if: steps.compare.outputs.has_update == 'true' && steps.issue.outputs.exists != 'true'
+        env:
+          DEB_URL: ${{ steps.upstream.outputs.deb_url }}
+        run: |
+          deb="${RUNNER_TEMP}/grok-bot.deb"
+          echo "Downloading $DEB_URL"
+          curl -fsSL --retry 3 --retry-delay 2 --max-time 300 "$DEB_URL" -o "$deb"
+          bytes=$(wc -c < "$deb")
+          echo "Deb size: ${bytes} bytes"
+          if [[ "$bytes" -lt 1000000 ]]; then
+            echo "ERROR: deb is unexpectedly small"
+            exit 1
+          fi
+          if [[ "$(head -c 7 "$deb")" != '!<arch>' ]]; then
+            echo "ERROR: download is not a deb archive"
+            exit 1
+          fi
+          sha=$(sha256sum "$deb" | awk '{print $1}')
+          if [[ ! "$sha" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "ERROR: sha256 is not 64 hex chars: $sha"
+            exit 1
+          fi
+          echo "sha256: $sha"
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Notify about new version
+        if: steps.compare.outputs.has_update == 'true' && steps.issue.outputs.exists != 'true'
+        uses: actions/github-script@v7
+        env:
+          UPSTREAM_VERSION: ${{ steps.upstream.outputs.version }}
+          UPSTREAM_COMMIT: ${{ steps.upstream.outputs.commit }}
+          AUR_VERSION: ${{ steps.aur.outputs.version }}
+          AUR_COMMIT: ${{ steps.aur.outputs.commit }}
+          DEB_URL: ${{ steps.upstream.outputs.deb_url }}
+          SHA256: ${{ steps.deb.outputs.sha256 }}
+        with:
+          script: |
+            const version = process.env.UPSTREAM_VERSION;
+            const commit = process.env.UPSTREAM_COMMIT;
+            const aurVersion = process.env.AUR_VERSION;
+            const aurCommit = process.env.AUR_COMMIT;
+            const debUrl = process.env.DEB_URL;
+            const sha256 = process.env.SHA256;
+            const title = `New grok-bot version for pkg grok-bot-bin: ${version}`;
+            const body = [
+              '@olwig',
+              '',
+              `New version found for pkg grok-bot-bin: **${version} (${commit})**`,
+              '',
+              `AUR https://aur.archlinux.org/packages/grok-bot-bin is **${aurVersion} (${aurCommit})**.`,
+              '',
+              'Please update the PKGBUILD for `grok-bot-bin`:',
+              '',
+              '```',
+              `pkgver=${version}`,
+              'pkgrel=1',
+              `_commit=${commit}`,
+              '```',
+              '',
+              `deb: ${debUrl}`,
+              '',
+              'Replace the first `sha256sums` entry (the .deb). Leave the other sums as they are.',
+              '',
+              `\`${sha256}\``,
+            ].join('\n');
+
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+            });
+            core.info(`Created ${issue.data.html_url}`);
