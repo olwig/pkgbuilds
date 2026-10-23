@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Upstream version
         id: upstream
@@ -224,7 +224,7 @@ jobs:
       - name: Look for an open issue
         id: issue
         if: steps.compare.outputs.has_update == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           UPSTREAM_VERSION: ${{ steps.upstream.outputs.version }}
         with:
@@ -274,7 +274,7 @@ jobs:
 
       - name: Notify about new version
         if: steps.compare.outputs.has_update == 'true' && steps.issue.outputs.exists != 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           UPSTREAM_VERSION: ${{ steps.upstream.outputs.version }}
           UPSTREAM_COMMIT: ${{ steps.upstream.outputs.commit }}
