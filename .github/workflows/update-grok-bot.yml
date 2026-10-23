@@ -21,6 +21,9 @@ jobs:
         shell: bash -euo pipefail {0}
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Upstream version
         id: upstream
         run: |
@@ -56,27 +59,93 @@ jobs:
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
           echo "deb_url=$deb_url" >> "$GITHUB_OUTPUT"
 
+      - name: Local PKGBUILD
+        id: local
+        run: |
+          pkgbuild="packages/grok-bot-bin/PKGBUILD"
+          if [[ ! -f "$pkgbuild" ]]; then
+            echo "ERROR: $pkgbuild not found"
+            exit 1
+          fi
+
+          read_field() {
+            local field=$1
+            local -a lines=()
+            local value
+            mapfile -t lines < <(grep -E "^${field}=.+" "$pkgbuild" || true)
+            if [[ ${#lines[@]} -ne 1 ]]; then
+              echo "ERROR: expected one ${field} in $pkgbuild" >&2
+              printf '%s lines: %s\n' "$field" "${lines[@]:-}" >&2
+              exit 1
+            fi
+            value=${lines[0]#${field}=}
+            value=${value#\"}
+            value=${value%\"}
+            value=${value#\'}
+            value=${value%\'}
+            printf '%s' "$value"
+          }
+
+          version=$(read_field pkgver)
+          rel=$(read_field pkgrel)
+          commit=$(read_field _commit)
+
+          if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){2,}$ ]]; then
+            echo "ERROR: local pkgver is not numeric: $version"
+            exit 1
+          fi
+          if [[ ! "$rel" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: local pkgrel is not an integer: $rel"
+            exit 1
+          fi
+          if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "ERROR: local _commit is not 40 hex chars: $commit"
+            exit 1
+          fi
+
+          echo "Local version: $version"
+          echo "Local release: $rel"
+          echo "Local commit:  $commit"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "rel=$rel" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
       - name: AUR PKGBUILD
         id: aur
         run: |
           dest="${RUNNER_TEMP}/grok-bot-bin"
+          pkgbuild="$dest/PKGBUILD"
           echo "Cloning https://aur.archlinux.org/grok-bot-bin.git"
           git clone --depth 1 --quiet https://aur.archlinux.org/grok-bot-bin.git "$dest"
 
-          mapfile -t pkgver_lines < <(grep -E '^pkgver=.+' "$dest/PKGBUILD")
-          mapfile -t commit_lines < <(grep -E '^_commit=.+' "$dest/PKGBUILD")
-          if [[ ${#pkgver_lines[@]} -ne 1 || ${#commit_lines[@]} -ne 1 ]]; then
-            echo "ERROR: expected one pkgver and one _commit in the AUR PKGBUILD"
-            printf 'pkgver lines: %s\n' "${pkgver_lines[@]:-}"
-            printf '_commit lines: %s\n' "${commit_lines[@]:-}"
-            exit 1
-          fi
+          read_field() {
+            local field=$1
+            local -a lines=()
+            local value
+            mapfile -t lines < <(grep -E "^${field}=.+" "$pkgbuild" || true)
+            if [[ ${#lines[@]} -ne 1 ]]; then
+              echo "ERROR: expected one ${field} in the AUR PKGBUILD" >&2
+              printf '%s lines: %s\n' "$field" "${lines[@]:-}" >&2
+              exit 1
+            fi
+            value=${lines[0]#${field}=}
+            value=${value#\"}
+            value=${value%\"}
+            value=${value#\'}
+            value=${value%\'}
+            printf '%s' "$value"
+          }
 
-          version=${pkgver_lines[0]#pkgver=}
-          commit=${commit_lines[0]#_commit=}
+          version=$(read_field pkgver)
+          rel=$(read_field pkgrel)
+          commit=$(read_field _commit)
 
           if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){2,}$ ]]; then
             echo "ERROR: AUR pkgver is not numeric: $version"
+            exit 1
+          fi
+          if [[ ! "$rel" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: AUR pkgrel is not an integer: $rel"
             exit 1
           fi
           if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]]; then
@@ -85,8 +154,10 @@ jobs:
           fi
 
           echo "AUR version: $version"
+          echo "AUR release: $rel"
           echo "AUR commit:  $commit"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "rel=$rel" >> "$GITHUB_OUTPUT"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
 
       - name: Compare versions
@@ -94,28 +165,60 @@ jobs:
         env:
           UPSTREAM_VERSION: ${{ steps.upstream.outputs.version }}
           UPSTREAM_COMMIT: ${{ steps.upstream.outputs.commit }}
+          LOCAL_VERSION: ${{ steps.local.outputs.version }}
+          LOCAL_REL: ${{ steps.local.outputs.rel }}
+          LOCAL_COMMIT: ${{ steps.local.outputs.commit }}
           AUR_VERSION: ${{ steps.aur.outputs.version }}
+          AUR_REL: ${{ steps.aur.outputs.rel }}
           AUR_COMMIT: ${{ steps.aur.outputs.commit }}
         run: |
-          echo "Upstream: $UPSTREAM_VERSION ($UPSTREAM_COMMIT)"
-          echo "AUR:      $AUR_VERSION ($AUR_COMMIT)"
+          echo "Cursor: $UPSTREAM_VERSION ($UPSTREAM_COMMIT)"
+          echo "Local:  $LOCAL_VERSION-$LOCAL_REL ($LOCAL_COMMIT)"
+          echo "AUR:    $AUR_VERSION-$AUR_REL ($AUR_COMMIT)"
 
-          if [[ "$UPSTREAM_COMMIT" == "$AUR_COMMIT" ]]; then
-            echo "Commits match. Nothing to do."
-            echo "has_update=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "Commits differ."
-
-          if dpkg --compare-versions "$UPSTREAM_VERSION" gt "$AUR_VERSION"; then
-            echo "Upstream version is higher. Update needed."
-            echo "has_update=true" >> "$GITHUB_OUTPUT"
-          elif dpkg --compare-versions "$UPSTREAM_VERSION" eq "$AUR_VERSION"; then
-            echo "Versions are equal and commits differ. No issue."
-            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          has_update=false
+          if dpkg --compare-versions "$UPSTREAM_VERSION" gt "$LOCAL_VERSION"; then
+            echo "Cursor version is higher than local. Update needed."
+            has_update=true
+          elif dpkg --compare-versions "$UPSTREAM_VERSION" eq "$LOCAL_VERSION"; then
+            echo "Cursor and local versions are equal. No issue."
+            if [[ "$UPSTREAM_COMMIT" != "$LOCAL_COMMIT" ]]; then
+              echo "Cursor and local commits differ at the same version."
+            fi
           else
-            echo "AUR version is higher than upstream. No issue."
-            echo "has_update=false" >> "$GITHUB_OUTPUT"
+            echo "Local version is higher than Cursor. No issue."
+          fi
+
+          aur_status=match
+          aur_hint=""
+          if dpkg --compare-versions "$AUR_VERSION" eq "$LOCAL_VERSION" \
+              && [[ "$AUR_REL" == "$LOCAL_REL" ]]; then
+            if [[ "$AUR_COMMIT" == "$LOCAL_COMMIT" ]]; then
+              echo "AUR matches this repo."
+            else
+              aur_status=commit
+              aur_hint="AUR has the same version and release, but a different commit (${AUR_COMMIT})."
+              echo "$aur_hint"
+            fi
+          elif dpkg --compare-versions "$AUR_VERSION" gt "$LOCAL_VERSION" \
+              || { dpkg --compare-versions "$AUR_VERSION" eq "$LOCAL_VERSION" && (( 10#$AUR_REL > 10#$LOCAL_REL )); }; then
+            aur_status=ahead
+            aur_hint="AUR is ahead of this repo (AUR ${AUR_VERSION}-${AUR_REL}, here ${LOCAL_VERSION}-${LOCAL_REL})."
+            echo "$aur_hint"
+          else
+            aur_status=behind
+            aur_hint="AUR is behind this repo (AUR ${AUR_VERSION}-${AUR_REL}, here ${LOCAL_VERSION}-${LOCAL_REL})."
+            echo "$aur_hint"
+          fi
+
+          {
+            echo "has_update=$has_update"
+            echo "aur_status=$aur_status"
+            echo "aur_hint=$aur_hint"
+          } >> "$GITHUB_OUTPUT"
+
+          if [[ "$aur_status" != "match" && "$has_update" != "true" ]]; then
+            echo "::warning::$aur_hint"
           fi
 
       - name: Look for an open issue
@@ -175,27 +278,39 @@ jobs:
         env:
           UPSTREAM_VERSION: ${{ steps.upstream.outputs.version }}
           UPSTREAM_COMMIT: ${{ steps.upstream.outputs.commit }}
+          LOCAL_VERSION: ${{ steps.local.outputs.version }}
+          LOCAL_REL: ${{ steps.local.outputs.rel }}
+          LOCAL_COMMIT: ${{ steps.local.outputs.commit }}
           AUR_VERSION: ${{ steps.aur.outputs.version }}
+          AUR_REL: ${{ steps.aur.outputs.rel }}
           AUR_COMMIT: ${{ steps.aur.outputs.commit }}
+          AUR_HINT: ${{ steps.compare.outputs.aur_hint }}
           DEB_URL: ${{ steps.upstream.outputs.deb_url }}
           SHA256: ${{ steps.deb.outputs.sha256 }}
         with:
           script: |
             const version = process.env.UPSTREAM_VERSION;
             const commit = process.env.UPSTREAM_COMMIT;
+            const localVersion = process.env.LOCAL_VERSION;
+            const localRel = process.env.LOCAL_REL;
+            const localCommit = process.env.LOCAL_COMMIT;
             const aurVersion = process.env.AUR_VERSION;
+            const aurRel = process.env.AUR_REL;
             const aurCommit = process.env.AUR_COMMIT;
+            const aurHint = process.env.AUR_HINT || '';
             const debUrl = process.env.DEB_URL;
             const sha256 = process.env.SHA256;
             const title = `New grok-bot version for pkg grok-bot-bin: ${version}`;
             const body = [
               '@olwig',
               '',
-              `New version found for pkg grok-bot-bin: **${version} (${commit})**`,
+              `Cursor stable is **${version}** (\`${commit}\`).`,
+              `This repo \`packages/grok-bot-bin\` is **${localVersion}-${localRel}** (\`${localCommit}\`).`,
               '',
-              `AUR https://aur.archlinux.org/packages/grok-bot-bin is **${aurVersion} (${aurCommit})**.`,
+              `AUR https://aur.archlinux.org/packages/grok-bot-bin is **${aurVersion}-${aurRel}** (\`${aurCommit}\`).`,
+              ...(aurHint ? [aurHint] : []),
               '',
-              'Please update the PKGBUILD for `grok-bot-bin`:',
+              'Update the PKGBUILD in `packages/grok-bot-bin` to the newest version, reset the release, and set the commit. Don\'t forget the checksum for the Debian file.',
               '',
               '```',
               `pkgver=${version}`,
@@ -203,11 +318,17 @@ jobs:
               `_commit=${commit}`,
               '```',
               '',
+              `sha256sum: \`${sha256}\``,
+              '',
+              'And also be sure to recreate `.SRCINFO`!',
+              '',
+              'You can cloud-build the package with the makepkg workflow to see if it works. In case you create a PR, run that workflow before the PR and post the link to the successful action.',
+              '',
+              '```',
+              'gh workflow run makepkg.yml --ref <that-branch> -f pkgs=grok-bot-bin',
+              '```',
+              '',
               `deb: ${debUrl}`,
-              '',
-              'Replace the first `sha256sums` entry (the .deb). Leave the other sums as they are.',
-              '',
-              `\`${sha256}\``,
             ].join('\n');
 
             const issue = await github.rest.issues.create({
