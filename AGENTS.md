@@ -29,6 +29,7 @@ PKGBUILD is the upstream software license.
 - If you change a PKGBUILD, regenerate `.SRCINFO` in the same directory:
   `makepkg --printsrcinfo > .SRCINFO`
 - Prefer skills under `.agents/skills/` over improvised AUR/PKGBUILD procedure.
+- Write comments and documentation in English only.
 
 ## Validation
 
