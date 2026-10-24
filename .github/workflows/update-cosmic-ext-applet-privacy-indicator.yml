@@ -29,9 +29,21 @@ jobs:
         run: |
           url="https://api.github.com/repos/D-Brox/cosmic-ext-applet-privacy-indicator/releases/latest"
           echo "Fetching $url"
-          json=$(curl -fsSL --retry 3 --retry-delay 2 --max-time 30 \
+          response=$(curl -sSL --retry 3 --retry-delay 2 --max-time 30 \
             -H "Accept: application/vnd.github+json" \
-            "$url")
+            -w "\nHTTP_CODE:%{http_code}" \
+            "$url") || true
+      
+          http_code=$(echo "$response" | tail -n1 | cut -d: -f2)
+          body=$(echo "$response" | sed '$d')
+      
+          if [[ "$http_code" != "200" ]]; then
+            echo "ERROR: HTTP $http_code"
+            echo "$body"
+            exit 1
+          fi
+      
+          json="$body"
 
           tag=$(jq -er '.tag_name' <<<"$json")
           draft=$(jq -er '.draft' <<<"$json")
