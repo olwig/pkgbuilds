@@ -26,11 +26,15 @@ jobs:
 
       - name: Upstream version
         id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          trap 'echo "ERROR: step failed at line $LINENO: $BASH_COMMAND" >&2' ERR
           url="https://api.github.com/repos/D-Brox/cosmic-ext-applet-privacy-indicator/releases/latest"
           echo "Fetching $url"
           response=$(curl -sSL --retry 3 --retry-delay 2 --max-time 30 \
             -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
             -w "\nHTTP_CODE:%{http_code}" \
             "$url") || true
       
@@ -46,8 +50,8 @@ jobs:
           json="$body"
 
           tag=$(jq -er '.tag_name' <<<"$json")
-          draft=$(jq -er '.draft' <<<"$json")
-          prerelease=$(jq -er '.prerelease' <<<"$json")
+          draft=$(jq -r '.draft | tostring' <<<"$json")
+          prerelease=$(jq -r '.prerelease | tostring' <<<"$json")
           release_url=$(jq -er '.html_url' <<<"$json")
           version=${tag#v}
 
