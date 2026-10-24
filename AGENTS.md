@@ -30,6 +30,7 @@ PKGBUILD is the upstream software license.
   `makepkg --printsrcinfo > .SRCINFO`
 - Prefer skills under `.agents/skills/` over improvised AUR/PKGBUILD procedure.
 - Write comments and documentation in English only.
+- Do not create comments to explain code unless explicitly told.
 
 ## Validation
 
