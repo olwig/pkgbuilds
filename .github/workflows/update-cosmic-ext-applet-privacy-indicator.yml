@@ -1,0 +1,330 @@
+name: update-cosmic-ext-applet-privacy-indicator
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: update-cosmic-ext-applet-privacy-indicator
+  cancel-in-progress: false
+
+jobs:
+  cosmic-ext-applet-privacy-indicator:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    defaults:
+      run:
+        shell: bash -euo pipefail {0}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Upstream version
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          url="https://api.github.com/repos/D-Brox/cosmic-ext-applet-privacy-indicator/releases/latest"
+          echo "Fetching $url"
+          json=$(curl -fsSL --retry 3 --retry-delay 2 --max-time 30 \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "$url")
+
+          tag=$(jq -er '.tag_name' <<<"$json")
+          draft=$(jq -er '.draft' <<<"$json")
+          prerelease=$(jq -er '.prerelease' <<<"$json")
+          release_url=$(jq -er '.html_url' <<<"$json")
+          version=${tag#v}
+
+          if [[ "$draft" != "false" || "$prerelease" != "false" ]]; then
+            echo "ERROR: latest release is a draft or prerelease: $tag"
+            exit 1
+          fi
+          if [[ "$tag" != "v${version}" ]]; then
+            echo "ERROR: release tag is not v plus version: $tag"
+            exit 1
+          fi
+          if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){2,}$ ]]; then
+            echo "ERROR: release tag is not a numeric version: $tag"
+            exit 1
+          fi
+          case "$release_url" in
+            "https://github.com/D-Brox/cosmic-ext-applet-privacy-indicator/releases/tag/${tag}") ;;
+            *)
+              echo "ERROR: release URL does not match the tag: $release_url"
+              exit 1
+              ;;
+          esac
+
+          source_url="https://github.com/D-Brox/cosmic-ext-applet-privacy-indicator/archive/refs/tags/${tag}.tar.gz"
+
+          echo "Upstream tag:     $tag"
+          echo "Upstream version: $version"
+          echo "Upstream release: $release_url"
+          echo "Upstream source:  $source_url"
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "release_url=$release_url"
+            echo "source_url=$source_url"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Local PKGBUILD
+        id: local
+        run: |
+          pkgbuild="packages/cosmic-ext-applet-privacy-indicator/PKGBUILD"
+          if [[ ! -f "$pkgbuild" ]]; then
+            echo "ERROR: $pkgbuild not found"
+            exit 1
+          fi
+
+          read_field() {
+            local field=$1
+            local -a lines=()
+            local value
+            mapfile -t lines < <(grep -E "^${field}=.+" "$pkgbuild" || true)
+            if [[ ${#lines[@]} -ne 1 ]]; then
+              echo "ERROR: expected one ${field} in $pkgbuild" >&2
+              printf '%s lines: %s\n' "$field" "${lines[@]:-}" >&2
+              exit 1
+            fi
+            value=${lines[0]#${field}=}
+            value=${value#\"}
+            value=${value%\"}
+            value=${value#\'}
+            value=${value%\'}
+            printf '%s' "$value"
+          }
+
+          version=$(read_field pkgver)
+          rel=$(read_field pkgrel)
+
+          if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){2,}$ ]]; then
+            echo "ERROR: local pkgver is not numeric: $version"
+            exit 1
+          fi
+          if [[ ! "$rel" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: local pkgrel is not an integer: $rel"
+            exit 1
+          fi
+
+          echo "Local version: $version"
+          echo "Local release: $rel"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "rel=$rel" >> "$GITHUB_OUTPUT"
+
+      - name: AUR PKGBUILD
+        id: aur
+        run: |
+          dest="${RUNNER_TEMP}/cosmic-ext-applet-privacy-indicator"
+          pkgbuild="$dest/PKGBUILD"
+          echo "Cloning https://aur.archlinux.org/cosmic-ext-applet-privacy-indicator.git"
+          git clone --depth 1 --quiet https://aur.archlinux.org/cosmic-ext-applet-privacy-indicator.git "$dest"
+
+          read_field() {
+            local field=$1
+            local -a lines=()
+            local value
+            mapfile -t lines < <(grep -E "^${field}=.+" "$pkgbuild" || true)
+            if [[ ${#lines[@]} -ne 1 ]]; then
+              echo "ERROR: expected one ${field} in the AUR PKGBUILD" >&2
+              printf '%s lines: %s\n' "$field" "${lines[@]:-}" >&2
+              exit 1
+            fi
+            value=${lines[0]#${field}=}
+            value=${value#\"}
+            value=${value%\"}
+            value=${value#\'}
+            value=${value%\'}
+            printf '%s' "$value"
+          }
+
+          version=$(read_field pkgver)
+          rel=$(read_field pkgrel)
+
+          if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){2,}$ ]]; then
+            echo "ERROR: AUR pkgver is not numeric: $version"
+            exit 1
+          fi
+          if [[ ! "$rel" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: AUR pkgrel is not an integer: $rel"
+            exit 1
+          fi
+
+          echo "AUR version: $version"
+          echo "AUR release: $rel"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "rel=$rel" >> "$GITHUB_OUTPUT"
+
+      - name: Compare versions
+        id: compare
+        env:
+          UPSTREAM_VERSION: ${{ steps.upstream.outputs.version }}
+          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
+          LOCAL_VERSION: ${{ steps.local.outputs.version }}
+          LOCAL_REL: ${{ steps.local.outputs.rel }}
+          AUR_VERSION: ${{ steps.aur.outputs.version }}
+          AUR_REL: ${{ steps.aur.outputs.rel }}
+        run: |
+          echo "Release: $UPSTREAM_VERSION ($UPSTREAM_TAG)"
+          echo "Local:   $LOCAL_VERSION-$LOCAL_REL"
+          echo "AUR:     $AUR_VERSION-$AUR_REL"
+
+          has_update=false
+          if dpkg --compare-versions "$UPSTREAM_VERSION" gt "$LOCAL_VERSION"; then
+            echo "Release version is higher than local. Update needed."
+            has_update=true
+          elif dpkg --compare-versions "$UPSTREAM_VERSION" eq "$LOCAL_VERSION"; then
+            echo "Release and local versions are equal. No issue."
+          else
+            echo "Local version is higher than the release. No issue."
+          fi
+
+          aur_status=match
+          aur_hint=""
+          if dpkg --compare-versions "$AUR_VERSION" eq "$LOCAL_VERSION" \
+              && [[ "$AUR_REL" == "$LOCAL_REL" ]]; then
+            echo "AUR matches this repo."
+          elif dpkg --compare-versions "$AUR_VERSION" gt "$LOCAL_VERSION" \
+              || { dpkg --compare-versions "$AUR_VERSION" eq "$LOCAL_VERSION" && (( 10#$AUR_REL > 10#$LOCAL_REL )); }; then
+            aur_status=ahead
+            aur_hint="AUR is ahead of this repo (AUR ${AUR_VERSION}-${AUR_REL}, here ${LOCAL_VERSION}-${LOCAL_REL})."
+            echo "$aur_hint"
+          else
+            aur_status=behind
+            aur_hint="AUR is behind this repo (AUR ${AUR_VERSION}-${AUR_REL}, here ${LOCAL_VERSION}-${LOCAL_REL})."
+            echo "$aur_hint"
+          fi
+
+          {
+            echo "has_update=$has_update"
+            echo "aur_status=$aur_status"
+            echo "aur_hint=$aur_hint"
+          } >> "$GITHUB_OUTPUT"
+
+          if [[ "$aur_status" != "match" && "$has_update" != "true" ]]; then
+            echo "::warning::$aur_hint"
+          fi
+
+      - name: Look for an open issue
+        id: issue
+        if: steps.compare.outputs.has_update == 'true'
+        uses: actions/github-script@v9
+        env:
+          UPSTREAM_VERSION: ${{ steps.upstream.outputs.version }}
+        with:
+          script: |
+            const title = `New version for pkg cosmic-ext-applet-privacy-indicator: ${process.env.UPSTREAM_VERSION}`;
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            const found = issues.find((issue) => issue.title === title);
+            if (found) {
+              core.info(`Open issue already exists: ${found.html_url}`);
+              core.setOutput('exists', 'true');
+            } else {
+              core.info(`No open issue titled: ${title}`);
+              core.setOutput('exists', 'false');
+            }
+
+      - name: Download source archive and hash it
+        id: archive
+        if: steps.compare.outputs.has_update == 'true' && steps.issue.outputs.exists != 'true'
+        env:
+          SOURCE_URL: ${{ steps.upstream.outputs.source_url }}
+        run: |
+          archive="${RUNNER_TEMP}/cosmic-ext-applet-privacy-indicator.tar.gz"
+          echo "Downloading $SOURCE_URL"
+          curl -fsSL --retry 3 --retry-delay 2 --max-time 300 "$SOURCE_URL" -o "$archive"
+          bytes=$(wc -c < "$archive")
+          echo "Archive size: ${bytes} bytes"
+          if [[ "$bytes" -lt 1024 ]]; then
+            echo "ERROR: archive is unexpectedly small"
+            exit 1
+          fi
+          printf '\037\213' > "${RUNNER_TEMP}/gzip-magic"
+          if ! cmp -s -n 2 "$archive" "${RUNNER_TEMP}/gzip-magic"; then
+            echo "ERROR: download is not a gzip archive"
+            exit 1
+          fi
+          sha=$(sha256sum "$archive" | awk '{print $1}')
+          if [[ ! "$sha" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "ERROR: sha256 is not 64 hex chars: $sha"
+            exit 1
+          fi
+          echo "sha256: $sha"
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Notify about new version
+        if: steps.compare.outputs.has_update == 'true' && steps.issue.outputs.exists != 'true'
+        uses: actions/github-script@v9
+        env:
+          UPSTREAM_VERSION: ${{ steps.upstream.outputs.version }}
+          UPSTREAM_TAG: ${{ steps.upstream.outputs.tag }}
+          LOCAL_VERSION: ${{ steps.local.outputs.version }}
+          LOCAL_REL: ${{ steps.local.outputs.rel }}
+          AUR_VERSION: ${{ steps.aur.outputs.version }}
+          AUR_REL: ${{ steps.aur.outputs.rel }}
+          AUR_HINT: ${{ steps.compare.outputs.aur_hint }}
+          RELEASE_URL: ${{ steps.upstream.outputs.release_url }}
+          SOURCE_URL: ${{ steps.upstream.outputs.source_url }}
+          SHA256: ${{ steps.archive.outputs.sha256 }}
+        with:
+          script: |
+            const version = process.env.UPSTREAM_VERSION;
+            const tag = process.env.UPSTREAM_TAG;
+            const localVersion = process.env.LOCAL_VERSION;
+            const localRel = process.env.LOCAL_REL;
+            const aurVersion = process.env.AUR_VERSION;
+            const aurRel = process.env.AUR_REL;
+            const aurHint = process.env.AUR_HINT || '';
+            const releaseUrl = process.env.RELEASE_URL;
+            const sourceUrl = process.env.SOURCE_URL;
+            const sha256 = process.env.SHA256;
+            const title = `New version for pkg cosmic-ext-applet-privacy-indicator: ${version}`;
+            const body = [
+              '@olwig',
+              '',
+              `GitHub release is **${version}** (\`${tag}\`).`,
+              `This repo \`packages/cosmic-ext-applet-privacy-indicator\` is **${localVersion}-${localRel}**.`,
+              '',
+              `AUR https://aur.archlinux.org/packages/cosmic-ext-applet-privacy-indicator is **${aurVersion}-${aurRel}**.`,
+              ...(aurHint ? [aurHint] : []),
+              '',
+              'Update the PKGBUILD in `packages/cosmic-ext-applet-privacy-indicator` to the newest version and reset the release. Don\'t forget the checksum for the source archive.',
+              '',
+              '```',
+              `pkgver=${version}`,
+              'pkgrel=1',
+              '```',
+              '',
+              `sha256sum: \`${sha256}\``,
+              '',
+              'And also be sure to recreate `.SRCINFO`!',
+              '',
+              'You can cloud-build the package with the makepkg workflow to see if it works. In case you create a PR, run that workflow before the PR and post the link to the successful action.',
+              '',
+              '```',
+              'gh workflow run makepkg.yml --ref <that-branch> -f pkgs=cosmic-ext-applet-privacy-indicator',
+              '```',
+              '',
+              `release: ${releaseUrl}`,
+              `source: ${sourceUrl}`,
+            ].join('\n');
+
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+            });
+            core.info(`Created ${issue.data.html_url}`);

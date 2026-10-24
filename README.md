@@ -40,6 +40,7 @@ Package directories live under `packages/`.
 - grok-build
 - grok-build-git: [AUR](https://aur.archlinux.org/packages/grok-build-git)
 - grok-bot-bin: [AUR](https://aur.archlinux.org/packages/grok-bot-bin)
+- cosmic-ext-applet-privacy-indicator: [AUR](https://aur.archlinux.org/packages/cosmic-ext-applet-privacy-indicator)
 
 > ⚠️ **<u>grok-build</u>**
 > These packages install Grok on the host. If you are also paranoid about
