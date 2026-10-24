@@ -29,6 +29,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          trap 'echo "ERROR: step failed at line $LINENO: $BASH_COMMAND" >&2' ERR
           url="https://api.github.com/repos/D-Brox/cosmic-ext-applet-privacy-indicator/releases/latest"
           echo "Fetching $url"
           response=$(curl -sSL --retry 3 --retry-delay 2 --max-time 30 \
@@ -47,10 +48,13 @@ jobs:
           fi
       
           json="$body"
+          echo "HTTP $http_code, response body:"
+          echo "$json" | head -c 2000
+          echo
 
           tag=$(jq -er '.tag_name' <<<"$json")
-          draft=$(jq -er '.draft' <<<"$json")
-          prerelease=$(jq -er '.prerelease' <<<"$json")
+          draft=$(jq -r '.draft | tostring' <<<"$json")
+          prerelease=$(jq -r '.prerelease | tostring' <<<"$json")
           release_url=$(jq -er '.html_url' <<<"$json")
           version=${tag#v}
 
