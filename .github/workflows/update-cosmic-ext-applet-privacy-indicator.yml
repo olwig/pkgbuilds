@@ -48,9 +48,6 @@ jobs:
           fi
       
           json="$body"
-          echo "HTTP $http_code, response body:"
-          echo "$json" | head -c 2000
-          echo
 
           tag=$(jq -er '.tag_name' <<<"$json")
           draft=$(jq -r '.draft | tostring' <<<"$json")
