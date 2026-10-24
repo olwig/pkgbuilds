@@ -26,14 +26,11 @@ jobs:
 
       - name: Upstream version
         id: upstream
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           url="https://api.github.com/repos/D-Brox/cosmic-ext-applet-privacy-indicator/releases/latest"
           echo "Fetching $url"
           json=$(curl -fsSL --retry 3 --retry-delay 2 --max-time 30 \
             -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $GH_TOKEN" \
             "$url")
 
           tag=$(jq -er '.tag_name' <<<"$json")
