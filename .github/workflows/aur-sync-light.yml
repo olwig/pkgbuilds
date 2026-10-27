@@ -23,7 +23,7 @@ jobs:
       GIT_NAME: ${{ secrets.GIT_NAME }}
       GIT_EMAIL: ${{ secrets.GIT_EMAIL }}
       # TODO replace with info from repo.yml
-      PKGS: grok-build-git grok-build-bin
+      PKGS: grok-bot-bin grok-build-git grok-build-bin
       PUSH_DRY_RUN: ${{ github.event.inputs.push_dry_run || 'true' }}
 
     steps:
