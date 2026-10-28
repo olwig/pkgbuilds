@@ -13,6 +13,23 @@ on:
           - true
           - false
         default: 'true'
+      pkgs_opts:
+        description: 'Select package set to sync as space-separated list. Use "all" to sync all selectable packages.'
+        required: false
+        type: choice
+        options:
+          - 'all' # all means, all the following options as space-separated list which are actual packages in the repo
+          - 'list' # use separate list input (pkgs_list) with space-separated list of packages to sync
+          - 'grok-build-git'
+          - 'grok-build-bin'
+          - 'cosmic-ext-applet-privacy-indicator'
+        default: 'all'
+      pkgs_list:
+        description: 'space-separated list of packages to sync. Only used if pkgs_opts is set to "list".'
+        required: false
+        type: string
+        default: ''
+
     
 jobs:
   aur-sync:
@@ -22,13 +39,55 @@ jobs:
       AUR_ED25519_GITHUB: ${{ secrets.AUR_ED25519_GITHUB }}
       GIT_NAME: ${{ secrets.GIT_NAME }}
       GIT_EMAIL: ${{ secrets.GIT_EMAIL }}
-      # TODO replace with info from repo.yml
-      PKGS: grok-build-git grok-build-bin cosmic-ext-applet-privacy-indicator
+      PKGS_OPTS: ${{ github.event.inputs.pkgs_opts }}
+      PKGS_LIST: ${{ github.event.inputs.pkgs_list }}
+      PKGS: ""
       PUSH_DRY_RUN: ${{ github.event.inputs.push_dry_run || 'true' }}
+      REPO_YML: ".github/workflows/aur-sync-light.yml"
 
     steps:
-      - name: Check environment variables
+
+      - name: Checkout github repo
+        uses: actions/checkout@v7
+        with:
+          path: repo/
+
+      - name: Build package list from inputs
+        working-directory: repo/
         run: |
+
+          if [[ "$PKGS_OPTS" == "all" ]]; then
+            wf_file=".github/workflows/aur-sync-light.yml"
+            PKGS=$(yq -r '.["on"].workflow_dispatch.inputs.pkgs_opts.options | .[2:] | join(" ")' "$wf_file")
+          elif [[ "$PKGS_OPTS" == "list" ]]; then
+            PKGS="$PKGS_LIST"
+          else
+            PKGS="$PKGS_OPTS"
+          fi
+
+          echo "Normalized package list:"
+          for pkg in $PKGS; do
+            echo "   - $pkg"
+          done
+
+          for pkg in $PKGS; do
+            if [[ ! -d "packages/$pkg" ]]; then
+              echo "ERROR: Package directory 'packages/$pkg' does not exist."
+              exit 1
+            fi
+          done
+
+          echo "PKGS=$PKGS" >> $GITHUB_ENV
+
+      - name: Check and set environment variables
+        working-directory: repo/
+        run: |
+
+          if [[ -z "$PKGS" ]]; then
+            echo "ERROR: PKGS is not set. Please set it in the workflow environment variables."
+            exit 1
+          fi
+
           if [[ -z "$AUR_ED25519_GITHUB" ]]; then
             echo "ERROR: AUR_ED25519_GITHUB is not set. Please set it in the repository secrets."
             exit 1
@@ -39,10 +98,25 @@ jobs:
             exit 1
           fi
 
-          if [[ -z "$PKGS" ]]; then
-            echo "ERROR: PKGS is not set. Please set it in the workflow environment variables."
-            ecxit 1
+          if [[ "${PUSH_DRY_RUN,,}" != "false" ]]; then
+            PUSH_DRY_RUN=true
           fi
+
+          if [[ -z "$REPO_YML" ]]; then
+            echo "ERROR: REPO_YML is not set. Please set it to an existing repo.yml file path."
+            exit 1
+          fi
+
+          if [[ ! -f "$REPO_YML" ]]; then
+            echo "ERROR: REPO_YML file '$REPO_YML' does not exist."
+            exit 1
+          fi
+
+      - name: Read packages specificy options
+        working-directory: repo/
+        run: |
+          echo "TODO implement, repo.yml with package specific options"
+
       - name: Store helper lib
         run: |
           cat > lib.sh <<-'EOF'
@@ -140,11 +214,6 @@ jobs:
               exit 1
             }
           done
-
-      - name: Checkout github repo
-        uses: actions/checkout@v3
-        with:
-          path: repo/
 
       - name: Dump tree
         run: |
