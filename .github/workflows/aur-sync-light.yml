@@ -226,10 +226,16 @@ jobs:
 
           pkgs=${PKGS:-}
 
-          wf_print "Packages to update: $pkgs"
+          wf_print "=============================================="
+          wf_print "Packages to update:"
           for pkg in $pkgs; do
+            wf_print "   - $pkg"
+          done
+          
+          for pkg in $pkgs; do
+            wf_print "=============================================="
             wf_print " => Working on package: $pkg"
-
+            
             monorepo_dir="repo"
             aurrepo_dir="aur/$pkg"
             
@@ -275,3 +281,4 @@ jobs:
             fi
             "${push_cmd[@]}"
           done
+          wf_print "=============================================="
