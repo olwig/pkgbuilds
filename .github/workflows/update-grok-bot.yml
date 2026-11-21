@@ -165,60 +165,60 @@ jobs:
         env:
           UPSTREAM_VERSION: ${{ steps.upstream.outputs.version }}
           UPSTREAM_COMMIT: ${{ steps.upstream.outputs.commit }}
-          LOCAL_VERSION: ${{ steps.local.outputs.version }}
-          LOCAL_REL: ${{ steps.local.outputs.rel }}
-          LOCAL_COMMIT: ${{ steps.local.outputs.commit }}
           AUR_VERSION: ${{ steps.aur.outputs.version }}
           AUR_REL: ${{ steps.aur.outputs.rel }}
           AUR_COMMIT: ${{ steps.aur.outputs.commit }}
+          LOCAL_VERSION: ${{ steps.local.outputs.version }}
+          LOCAL_REL: ${{ steps.local.outputs.rel }}
+          LOCAL_COMMIT: ${{ steps.local.outputs.commit }}
         run: |
           echo "Cursor: $UPSTREAM_VERSION ($UPSTREAM_COMMIT)"
-          echo "Local:  $LOCAL_VERSION-$LOCAL_REL ($LOCAL_COMMIT)"
           echo "AUR:    $AUR_VERSION-$AUR_REL ($AUR_COMMIT)"
+          echo "Local:  $LOCAL_VERSION-$LOCAL_REL ($LOCAL_COMMIT)"
 
           has_update=false
-          if dpkg --compare-versions "$UPSTREAM_VERSION" gt "$LOCAL_VERSION"; then
-            echo "Cursor version is higher than local. Update needed."
+          if dpkg --compare-versions "$UPSTREAM_VERSION" gt "$AUR_VERSION"; then
+            echo "Cursor version is higher than AUR. Update needed."
             has_update=true
-          elif dpkg --compare-versions "$UPSTREAM_VERSION" eq "$LOCAL_VERSION"; then
-            echo "Cursor and local versions are equal. No issue."
-            if [[ "$UPSTREAM_COMMIT" != "$LOCAL_COMMIT" ]]; then
-              echo "Cursor and local commits differ at the same version."
+          elif dpkg --compare-versions "$UPSTREAM_VERSION" eq "$AUR_VERSION"; then
+            echo "Cursor and AUR versions are equal. No issue."
+            if [[ "$UPSTREAM_COMMIT" != "$AUR_COMMIT" ]]; then
+              echo "Cursor and AUR commits differ at the same version."
             fi
           else
-            echo "Local version is higher than Cursor. No issue."
+            echo "AUR version is higher than Cursor. No issue."
           fi
 
-          aur_status=match
-          aur_hint=""
-          if dpkg --compare-versions "$AUR_VERSION" eq "$LOCAL_VERSION" \
-              && [[ "$AUR_REL" == "$LOCAL_REL" ]]; then
-            if [[ "$AUR_COMMIT" == "$LOCAL_COMMIT" ]]; then
-              echo "AUR matches this repo."
+          local_status=match
+          local_hint=""
+          if dpkg --compare-versions "$LOCAL_VERSION" eq "$AUR_VERSION" \
+              && [[ "$LOCAL_REL" == "$AUR_REL" ]]; then
+            if [[ "$LOCAL_COMMIT" == "$AUR_COMMIT" ]]; then
+              echo "This repo matches AUR."
             else
-              aur_status=commit
-              aur_hint="AUR has the same version and release, but a different commit (${AUR_COMMIT})."
-              echo "$aur_hint"
+              local_status=commit
+              local_hint="This repo has the same version and release, but a different commit (${LOCAL_COMMIT})."
+              echo "$local_hint"
             fi
-          elif dpkg --compare-versions "$AUR_VERSION" gt "$LOCAL_VERSION" \
-              || { dpkg --compare-versions "$AUR_VERSION" eq "$LOCAL_VERSION" && (( 10#$AUR_REL > 10#$LOCAL_REL )); }; then
-            aur_status=ahead
-            aur_hint="AUR is ahead of this repo (AUR ${AUR_VERSION}-${AUR_REL}, here ${LOCAL_VERSION}-${LOCAL_REL})."
-            echo "$aur_hint"
+          elif dpkg --compare-versions "$LOCAL_VERSION" gt "$AUR_VERSION" \
+              || { dpkg --compare-versions "$LOCAL_VERSION" eq "$AUR_VERSION" && (( 10#$LOCAL_REL > 10#$AUR_REL )); }; then
+            local_status=ahead
+            local_hint="This repo is ahead of AUR (here ${LOCAL_VERSION}-${LOCAL_REL}, AUR ${AUR_VERSION}-${AUR_REL})."
+            echo "$local_hint"
           else
-            aur_status=behind
-            aur_hint="AUR is behind this repo (AUR ${AUR_VERSION}-${AUR_REL}, here ${LOCAL_VERSION}-${LOCAL_REL})."
-            echo "$aur_hint"
+            local_status=behind
+            local_hint="This repo is behind AUR (here ${LOCAL_VERSION}-${LOCAL_REL}, AUR ${AUR_VERSION}-${AUR_REL})."
+            echo "$local_hint"
           fi
 
           {
             echo "has_update=$has_update"
-            echo "aur_status=$aur_status"
-            echo "aur_hint=$aur_hint"
+            echo "local_status=$local_status"
+            echo "local_hint=$local_hint"
           } >> "$GITHUB_OUTPUT"
 
-          if [[ "$aur_status" != "match" && "$has_update" != "true" ]]; then
-            echo "::warning::$aur_hint"
+          if [[ "$local_status" != "match" && "$has_update" != "true" ]]; then
+            echo "::warning::$local_hint"
           fi
 
       - name: Look for an open issue
@@ -278,26 +278,26 @@ jobs:
         env:
           UPSTREAM_VERSION: ${{ steps.upstream.outputs.version }}
           UPSTREAM_COMMIT: ${{ steps.upstream.outputs.commit }}
-          LOCAL_VERSION: ${{ steps.local.outputs.version }}
-          LOCAL_REL: ${{ steps.local.outputs.rel }}
-          LOCAL_COMMIT: ${{ steps.local.outputs.commit }}
           AUR_VERSION: ${{ steps.aur.outputs.version }}
           AUR_REL: ${{ steps.aur.outputs.rel }}
           AUR_COMMIT: ${{ steps.aur.outputs.commit }}
-          AUR_HINT: ${{ steps.compare.outputs.aur_hint }}
+          LOCAL_VERSION: ${{ steps.local.outputs.version }}
+          LOCAL_REL: ${{ steps.local.outputs.rel }}
+          LOCAL_COMMIT: ${{ steps.local.outputs.commit }}
+          LOCAL_HINT: ${{ steps.compare.outputs.local_hint }}
           DEB_URL: ${{ steps.upstream.outputs.deb_url }}
           SHA256: ${{ steps.deb.outputs.sha256 }}
         with:
           script: |
             const version = process.env.UPSTREAM_VERSION;
             const commit = process.env.UPSTREAM_COMMIT;
-            const localVersion = process.env.LOCAL_VERSION;
-            const localRel = process.env.LOCAL_REL;
-            const localCommit = process.env.LOCAL_COMMIT;
             const aurVersion = process.env.AUR_VERSION;
             const aurRel = process.env.AUR_REL;
             const aurCommit = process.env.AUR_COMMIT;
-            const aurHint = process.env.AUR_HINT || '';
+            const localVersion = process.env.LOCAL_VERSION;
+            const localRel = process.env.LOCAL_REL;
+            const localCommit = process.env.LOCAL_COMMIT;
+            const localHint = process.env.LOCAL_HINT || '';
             const debUrl = process.env.DEB_URL;
             const sha256 = process.env.SHA256;
             const title = `New grok-bot version for pkg grok-bot-bin: ${version}`;
@@ -305,10 +305,10 @@ jobs:
               '@olwig',
               '',
               `Cursor stable is **${version}** (\`${commit}\`).`,
-              `This repo \`packages/grok-bot-bin\` is **${localVersion}-${localRel}** (\`${localCommit}\`).`,
-              '',
               `AUR https://aur.archlinux.org/packages/grok-bot-bin is **${aurVersion}-${aurRel}** (\`${aurCommit}\`).`,
-              ...(aurHint ? [aurHint] : []),
+              '',
+              `This repo \`packages/grok-bot-bin\` is **${localVersion}-${localRel}** (\`${localCommit}\`).`,
+              ...(localHint ? [localHint] : []),
               '',
               'Update the PKGBUILD in `packages/grok-bot-bin` to the newest version, reset the release, and set the commit. Don\'t forget the checksum for the Debian file.',
               '',
